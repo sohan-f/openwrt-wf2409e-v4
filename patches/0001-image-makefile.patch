@@ -1,0 +1,38 @@
+--- a/target/linux/realtek/image/Makefile
++++ b/target/linux/realtek/image/Makefile
+@@ -292,6 +292,35 @@
+   IMAGE/sysupgrade.bin = append-kernel | pad-offset 64k 16 | append-rootfs | pad-rootfs -x 16 | cvimg-kernel -S
+ endef
+ TARGET_DEVICES += ACTIONRF1200
++
++define Build/cvimg-kernel-cr6c
++        $(call Build/cvimg, \
++                -e $(CVIMG_LOADER_START_ADDR) \
++                -b $(CVIMG_KERNEL_BURN_ADDR) \
++                -s cr6c \
++                $(1))
++endef
++
++define Device/WF2409EV4
++  $(Device/RealtekDTS)
++  BLOCKSIZE := 64k
++  DEVICE_DTS := WF2409EV4
++  DEVICE_TITLE := Netis WF2409E v4
++  SUPPORTED_DEVICES := wf2409e-v4
++  # Kernel at 0x30000 (2.75 MiB); rootfs at 0x300000. IMAGE_SIZE stops at
++  # 0x7bc000 so the possible factory data area 0x7bc000..0x7f8000 is untouched.
++  IMAGE_SIZE := 7424k
++  DEV_PROFILE := WF2409EV4
++  DEVICE_PACKAGES := kmod-leds-gpio -swconfig
++  CMDLINE := console=ttyS0,38400 root=/dev/mtdblock3 rootfstype=squashfs rootwait
++  KERNEL := kernel-bin | append-dtb | lzma | loader-cmdline-compile
++  CVIMG_KERNEL_BURN_ADDR := 0x30000
++  CVIMG_LOADER_START_ADDR := 0x80A00000
++  IMAGES := factory.bin
++  IMAGE/factory.bin = append-kernel | cvimg-kernel-cr6c | check-size 2949120 | pad-to 2949120 | append-rootfs | pad-rootfs | check-size
++endef
++TARGET_DEVICES += WF2409EV4
++
+ endif
+ 
+ ifeq ($(SUBTARGET),rtl8196e)
