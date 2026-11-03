@@ -103,6 +103,39 @@ WF2409E build overrides the WPS LED to pin 35, so do not use `B7` for WPS.
 - `boot` (0x0..0x20000) contains the stage2 bootloader; the gzip payload
   starts at `0x9a60`, so do not shrink it to 64 KiB.
 
+## Stock bootloader validation (reverse-engineered)
+
+Everything below was read out of the loader, not inferred from a log. It is
+recorded here so the signature choice is never re-litigated from scratch.
+`tools/bootloader-check.py` re-implements both checks; run it on any
+`factory.bin` before flashing.
+
+Unpacking stage3 (the only copy of the loader we have is the friend's `mtd0`):
+
+- stage1 `0x0..0x7000`; stage2 at `0x8000`; gzip payload `0x9a60..0x138f4`.
+- Decompressed stage3 is 103,056 bytes, loads at `0x80000000`,
+  `v3.4.14b`, build `2023.12.07-10:26+0800`.
+
+| addr | name | behaviour |
+|---|---|---|
+| `0x8000db2c` | `check_system_image(flash, buf)` | reads 16 B header; byte-swaps fields 4/8/0xc; `cs6c`→1, `cr6c`→2, anything else→0; then requires a zero 16-bit BE sum over `len` payload bytes |
+| `0x8000de14` | `check_rootfs_image(flash)` | accepts `hsqs`/`sqsh`, reads BE u32 at +8 as a length, adds `0x282`, requires a zero 16-bit BE sum over that region |
+| `0x8000e050` | `find_image` | tries `0xb0010000`, `0xb0020000`, `0xb0030000`, then scans `0xb0010000..0xb0080000` in `0x1000` steps |
+| `0x8000e30c` | boot | prints `Loade addr : %X`, copies the payload to `start \| 0x20000000`, jumps to `start` |
+| `0x8000e54c` | `boot_image` | normal cold-boot entry; `find_image` then `0x8000e30c` |
+
+Why `cs6c`: `find_image` returns the `check_system_image` code. Code 2
+(`cr6c`) additionally runs the rootfs validation above, and code 0 makes
+`boot_image` write the watchdog and reset. OpenWrt's squashfs has `mkfs_time`
+at +8 and no vendor trailer, so the region it sums is ~1.6 GB and the check
+always fails — that is the "flashed, does not boot" failure. Code 1 (`cs6c`)
+returns before the rootfs checks. The jump path itself never looks at the
+signature: the only two references to the `cs6c`/`cr6c` strings in the whole
+loader are inside `check_system_image`.
+
+The payload checksum is still enforced for `cs6c`, and `cvimg` already emits
+it, so nothing else has to change.
+
 ## Image recipe
 
 `patches/0001-image-makefile.patch` inserts into

@@ -114,11 +114,13 @@ are not included.
 
 ## First flash
 
-The stock bootloader is minimal: its strings contain only `Booting...` and the
-SPI-move message, with no TFTP or recovery client. The vendor web UI
-(`netis.cgi`) accepts only a vendor image containing `cr6c`, `COMPCS`, and
-`COMPDS` tags and writes it to `/dev/mtdblock0` from offset `0x10`; it is not a
-path for this raw image.
+Run `tools/bootloader-check.py` on the image first; it re-implements the two
+checks the stock loader performs (see `REQUIREMENTS.md`, "Stock bootloader
+validation").
+
+The vendor web UI (`netis.cgi`) accepts only a vendor image containing `cr6c`,
+`COMPCS`, and `COMPDS` tags and writes it to `/dev/mtdblock0` from offset
+`0x10`; it is not a path for this raw image.
 
 A first flash therefore needs either:
 
@@ -129,10 +131,19 @@ A first flash therefore needs either:
 Back up all 8 MiB of NOR before any write. `platform.sh` rejects sysupgrade on
 this board, so later updates need the same manual path.
 
+Stage3 of the stock loader is not minimal: it carries a command interpreter
+(`HELP`, `DB`, `DW`, `EB`, `EW`, `CMP`, `MEMCPY`, `IPCONFIG`, `AUTOBURN`,
+`LOADADDR`, `J`, `FLI`, `FLR`, `FLW`, `ERASESECTOR`, `ERASECHIP`, `TI`,
+`XMOD`) at `0x80011680`. `0x8000e2d0` reaches it when the byte `m` is pending
+in the UART. That would allow a serial-only recovery/update path, but the exact
+key timing has not been verified on hardware.
+
 ## Unverified before first flash
 
-- **First-flash path** as above; no recovery path exists in the stock
-  bootloader.
+- **First-flash path** as above. The stock loader does have a command mode, but
+  the way into it is unverified (see above).
+- **Serial console** is the only boot diagnostic: 38400 8N1 on the board's
+  UART pads. Without it a failed boot is indistinguishable from a bad write.
 - **Driver patch 0003.** Skipping the external RGMII trunk is a hypothesis. If
   LAN/WAN is dead on first boot, check whether the internal switch needs part of
   the skipped block.
