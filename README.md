@@ -34,7 +34,7 @@ base-files that must not run on this board.
 |---|---|---|---|
 | `boot` | `0x0` | `0x20000` | stock bootloader, read-only |
 | `config` | `0x20000` | `0x10000` | COMPHS/COMPDS/COMPCS, read-only |
-| `kernel` | `0x30000` | `0x2d0000` | `cr6c` loader image |
+| `kernel` | `0x30000` | `0x2d0000` | `cs6c` loader image |
 | `rootfs` | `0x300000` | `0x4bc000` | squashfs + `rootfs_data` |
 | `factory` | `0x7bc000` | `0x3c000` | possible per-unit data, read-only |
 | `netis` | `0x7f8000` | `0x4000` | MAC/COMPHS, read-only |
@@ -66,16 +66,17 @@ been confirmed with a link on the physical jack.
 The recipe lives in `patches/0001-image-makefile.patch` (inserted inside the
 `rtl8197f` subtarget). It produces one `factory.bin`:
 
-- `0x00000` relative: `cr6c` kernel/loader image, padded to `0x2d0000`
+- `0x00000` relative: `cs6c` kernel/loader image, padded to `0x2d0000`
 - `0x2d0000` relative (`0x300000` absolute): raw squashfs rootfs
 - total capped at `7728k` (`0x78c000`), so `factory` and `netis` are untouched
 
 The loader is linked at `0x81000000`, relocates itself from `0x80a00000`
-(matching the stock `cr6c` header), decompresses to `0x80000000`, and jumps.
+(matching the stock header's start address), decompresses to `0x80000000`,
+and jumps.
 
 ## Patches
 
-- `0001-image-makefile.patch` — `Build/cvimg-kernel-cr6c` and
+- `0001-image-makefile.patch` — `Build/cvimg-kernel-cs6c` and
   `Device/WF2409EV4`.
 - `0002-disable-wifi.patch` — disables `CONFIG_RTL8197F_WMAC` and
   `CONFIG_RTL8192CD` for the wired-only build.

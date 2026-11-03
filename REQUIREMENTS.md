@@ -109,11 +109,13 @@ WF2409E build overrides the WPS LED to pin 35, so do not use `B7` for WPS.
 `target/linux/realtek/image/Makefile`:
 
 ```make
-define Build/cvimg-kernel-cr6c
+# cs6c skips the bootloader's vendor rootfs-checksum check, whose trailer
+# would be overwritten by OpenWrt's writable overlay.
+define Build/cvimg-kernel-cs6c
 	$(call Build/cvimg, \
 		-e $(CVIMG_LOADER_START_ADDR) \
 		-b $(CVIMG_KERNEL_BURN_ADDR) \
-		-s cr6c \
+		-s cs6c \
 		$(1))
 endef
 
@@ -132,12 +134,13 @@ define Device/WF2409EV4
   CVIMG_KERNEL_BURN_ADDR := 0x30000
   CVIMG_LOADER_START_ADDR := 0x80A00000
   IMAGES := factory.bin
-  IMAGE/factory.bin = append-kernel | cvimg-kernel-cr6c | check-size 2949120 | pad-to 2949120 | append-rootfs | pad-rootfs | check-size
+  IMAGE/factory.bin = append-kernel | cvimg-kernel-cs6c | check-size 2949120 | pad-to 2949120 | append-rootfs | pad-rootfs | check-size
 endef
 TARGET_DEVICES += WF2409EV4
 ```
 
-- `CVIMG_LOADER_START_ADDR=0x80A00000` matches the stock `cr6c` header.
+- `CVIMG_LOADER_START_ADDR=0x80A00000` matches the stock header's start
+  address.
 - The loader is linked at `LZMA_TEXT_START=0x81000000`, relocates itself from
   `0x80a00000`, decompresses the kernel to `LOADADDR=0x80000000`, then jumps.
 - `pad-to 2949120` (`0x2d0000`) puts the raw squashfs at absolute `0x300000`.

@@ -27,7 +27,7 @@ platform_check_image() {
 		return 0
 		;;
 	wf2409e-v4)
-		# The WF2409E image is a raw cr6c kernel at 0x30000 plus a raw
+		# The WF2409E image is a raw cs6c kernel at 0x30000 plus a raw
 		# squashfs at 0x300000. There is no single "firmware" mtd, so the
 		# generic default_do_upgrade() would write to the wrong place.
 		echo "WF2409E v4: sysupgrade is not supported yet; write factory.bin at 0x30000 from the bootloader."
