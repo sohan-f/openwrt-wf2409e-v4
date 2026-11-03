@@ -1,0 +1,48 @@
+name: Build WF2409E v4 image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: debian:bullseye
+    timeout-minutes: 360
+    env:
+      # Container jobs run as root; GNU tar's configure refuses that by default.
+      FORCE_UNSAFE_CONFIGURE: 1
+
+    steps:
+      - name: Point apt at the Debian archive
+        run: |
+          perl -pi -e 's|deb\.debian\.org|archive.debian.org|g' /etc/apt/sources.list
+          apt-get -o Acquire::Check-Valid-Until=false update
+
+      - name: Install build dependencies
+        run: |
+          apt-get install -y --no-install-recommends \
+            bc bison build-essential ca-certificates curl diffutils file flex \
+            gawk gettext git libelf-dev libncurses-dev libssl-dev patch \
+            perl python3 python3-distutils rsync unzip wget zlib1g-dev
+
+      - uses: actions/checkout@v4
+
+      - name: Cache OpenWrt downloads
+        uses: actions/cache@v4
+        with:
+          path: build/dl
+          key: wf2409e-dl-v1
+          restore-keys: |
+            wf2409e-dl-
+
+      - name: Build image
+        run: ./build.sh
+
+      - name: Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: wf2409e-v4-openwrt
+          path: build/openwrt/bin/targets/realtek/rtl8197f/*WF2409EV4*
+          if-no-files-found: error
