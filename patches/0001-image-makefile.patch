@@ -1,6 +1,6 @@
 --- a/target/linux/realtek/image/Makefile
 +++ b/target/linux/realtek/image/Makefile
-@@ -292,6 +292,35 @@
+@@ -292,6 +292,36 @@
    IMAGE/sysupgrade.bin = append-kernel | pad-offset 64k 16 | append-rootfs | pad-rootfs -x 16 | cvimg-kernel -S
  endef
  TARGET_DEVICES += ACTIONRF1200
@@ -19,11 +19,12 @@
 +  DEVICE_DTS := WF2409EV4
 +  DEVICE_TITLE := Netis WF2409E v4
 +  SUPPORTED_DEVICES := wf2409e-v4
-+  # Kernel at 0x30000 (2.75 MiB); rootfs at 0x300000. IMAGE_SIZE stops at
++  # Kernel at 0x30000 (2.75 MiB); rootfs at 0x300000. IMAGE_SIZE ends at
 +  # 0x7bc000 so the possible factory data area 0x7bc000..0x7f8000 is untouched.
-+  IMAGE_SIZE := 7424k
++  IMAGE_SIZE := 7728k
 +  DEV_PROFILE := WF2409EV4
-+  DEVICE_PACKAGES := kmod-leds-gpio -swconfig
++  DEVICE_PACKAGES := kmod-leds-gpio kmod-input-gpio-keys-polled \
++	-kmod-gpio-button-hotplug -swconfig
 +  CMDLINE := console=ttyS0,38400 root=/dev/mtdblock3 rootfstype=squashfs rootwait
 +  KERNEL := kernel-bin | append-dtb | lzma | loader-cmdline-compile
 +  CVIMG_KERNEL_BURN_ADDR := 0x30000

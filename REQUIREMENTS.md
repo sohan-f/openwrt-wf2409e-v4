@@ -123,9 +123,10 @@ define Device/WF2409EV4
   DEVICE_DTS := WF2409EV4
   DEVICE_TITLE := Netis WF2409E v4
   SUPPORTED_DEVICES := wf2409e-v4
-  IMAGE_SIZE := 7424k
+  IMAGE_SIZE := 7728k
   DEV_PROFILE := WF2409EV4
-  DEVICE_PACKAGES := kmod-leds-gpio -swconfig
+  DEVICE_PACKAGES := kmod-leds-gpio kmod-input-gpio-keys-polled \
+	-kmod-gpio-button-hotplug -swconfig
   CMDLINE := console=ttyS0,38400 root=/dev/mtdblock3 rootfstype=squashfs rootwait
   KERNEL := kernel-bin | append-dtb | lzma | loader-cmdline-compile
   CVIMG_KERNEL_BURN_ADDR := 0x30000
@@ -140,7 +141,7 @@ TARGET_DEVICES += WF2409EV4
 - The loader is linked at `LZMA_TEXT_START=0x81000000`, relocates itself from
   `0x80a00000`, decompresses the kernel to `LOADADDR=0x80000000`, then jumps.
 - `pad-to 2949120` (`0x2d0000`) puts the raw squashfs at absolute `0x300000`.
-- `IMAGE_SIZE=7424k` (`0x78c000`) ends at `0x7bc000`, leaving `factory` alone.
+- `IMAGE_SIZE=7728k` (`0x78c000`) ends at `0x7bc000`, leaving `factory` alone.
 - `check-size 2949120` fails the build if the kernel outgrows its slot;
   the final `check-size` enforces the total.
 
@@ -152,6 +153,9 @@ TARGET_DEVICES += WF2409EV4
   - A blank, all-zero, or all-FF value leaves the MAC unset; there is no
     fallback to the `config` block.
 - `01_leds`: `wf2409e:green:sys` (gpio0 15), `wf2409e:green:wps` (gpio1 3).
+- Buttons use `gpio-keys-polled` because the GPIO controllers have no
+  interrupt support; `kmod-input-gpio-keys-polled` is selected instead of the
+  default `kmod-gpio-button-hotplug`.
 - `realtek.sh`: `*"WF2409E v4"*` -> `wf2409e-v4`.
 - SSH only: `dropbear`; no LuCI, no uhttpd. `swconfig` is removed via
   `DEVICE_PACKAGES` because the switch is internal.

@@ -71,6 +71,9 @@ awk '/^CONFIG_TARGET_realtek_rtl8197f_DEVICE_WF2409EV4=y$/{f=1} END{exit !f}' \
 	exit 1
 }
 
+# Host tools first, verbosely: a tool build failure is otherwise reported only
+# as "re-run with V=s" because the parallel build swallows the compiler output.
+make -C "$OWRT" tools/compile V=s
 make -C "$OWRT" -j"${JOBS:-$(nproc)}"
 
 echo

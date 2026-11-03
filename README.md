@@ -68,7 +68,7 @@ The recipe lives in `patches/0001-image-makefile.patch` (inserted inside the
 
 - `0x00000` relative: `cr6c` kernel/loader image, padded to `0x2d0000`
 - `0x2d0000` relative (`0x300000` absolute): raw squashfs rootfs
-- total capped at `7424k` (`0x78c000`), so `factory` and `netis` are untouched
+- total capped at `7728k` (`0x78c000`), so `factory` and `netis` are untouched
 
 The loader is linked at `0x81000000`, relocates itself from `0x80a00000`
 (matching the stock `cr6c` header), decompresses to `0x80000000`, and jumps.
