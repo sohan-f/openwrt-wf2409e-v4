@@ -73,6 +73,11 @@ driver, so mac80211 and hostapd do not apply. netifd drives it through
 `lan`. There is no 5 GHz radio: `&pcie0` is disabled and the board has no PCIe
 card.
 
+`patches/0004-auto-crystal.patch` enables `CONFIG_AUTO_PCIE_PHY_SCAN` in the
+driver. The stock kernel does not hardcode the WLAN crystal: it reads
+`SR+0x08` bit 24 and selects 25 or 40 MHz at run time. The ADCDS build hardcodes
+25 MHz for the DIR-842; the strap read makes the same choice stock makes here.
+
 ## Image
 
 The recipe lives in `patches/0001-image-makefile.patch` (inserted inside the

@@ -207,6 +207,11 @@ TARGET_DEVICES += WF2409EV4
 bring-up driver that cannot beacon; the DT node is disabled anyway.
 `CONFIG_RTL8192CD=m` is the working 2.4 GHz driver and stays enabled.
 
+`patches/0004-auto-crystal.patch` defines `CONFIG_AUTO_PCIE_PHY_SCAN` for
+`rtl8192cd`, which makes it read the crystal strap instead of hardcoding
+25 MHz. The stock WF2409E kernel contains the same `SR+0x08` bit-24 test
+(`vmlinux:0x802272b4`); `CONFIG_PHY_EAT_40MHZ` is not set.
+
 Keep `CONFIG_RTL8366_SMI=y` and `CONFIG_RTL8367B_PHY=y`: `rtl819x-eth.c`
 still links against `rtl8367s_cpu_tag_enable()` / `rtl8367s_trunk_pause_set()`,
 even though patch 0003 skips the calls at runtime. Without those symbols the
