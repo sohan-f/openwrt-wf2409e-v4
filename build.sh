@@ -124,7 +124,10 @@ cp -a "${artifacts[@]}" "$OUT/"
 
 echo "== validate the factory image against the stock loader math"
 shopt -s nullglob
-factory_bins=("$OUT"/wf2409e*factory.bin)
+# Artifact names carry the full OpenWrt prefix
+# (openwrt-rtl819x-rtl8197f-netis_wf2409e_v4-squashfs-factory.bin), so match
+# on the suffix only; the count check still catches zero/ambiguous matches.
+factory_bins=("$OUT"/*factory.bin)
 shopt -u nullglob
 if [ "${#factory_bins[@]}" -ne 1 ]; then
 	echo "ERROR: expected exactly one factory image, found ${#factory_bins[@]}" >&2
