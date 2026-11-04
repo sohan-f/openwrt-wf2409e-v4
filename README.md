@@ -73,6 +73,12 @@ driver, so mac80211 and hostapd do not apply. netifd drives it through
 `lan`. There is no 5 GHz radio: `&pcie0` is disabled and the board has no PCIe
 card.
 
+The per-unit LAN MAC is `netis` offset 61 + 1 (`02_network`). It ends up on
+`network.lan_eth0_2_dev.macaddr`, not on `network.lan` — `config_generate`
+puts interface MACs on the generated device section, and the seed runs after
+it, so it reads that section for the SSID suffix and pins the same MAC on
+`wlan0`.
+
 `patches/0004-auto-crystal.patch` enables `CONFIG_AUTO_PCIE_PHY_SCAN` in the
 driver. The stock kernel does not hardcode the WLAN crystal: it reads
 `SR+0x08` bit 24 and selects 25 or 40 MHz at run time. The ADCDS build hardcodes

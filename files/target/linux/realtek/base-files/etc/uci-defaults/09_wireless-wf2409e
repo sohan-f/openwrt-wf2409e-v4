@@ -12,7 +12,9 @@
 
 uci -q get wireless.radio0 >/dev/null && exit 0
 
-lan_mac=$(uci -q get network.lan.macaddr)
+# config_generate puts the per-unit MAC on the LAN *device* section, not on
+# the interface; ../board.d/02_network is the only writer of that value.
+lan_mac=$(uci -q get network.lan_eth0_2_dev.macaddr)
 case "$lan_mac" in
 	[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]) ;;
 	*) lan_mac="" ;;
