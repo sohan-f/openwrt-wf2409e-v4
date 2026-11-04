@@ -112,12 +112,25 @@ fi
 echo "== collect artifacts"
 OUT="$BUILD_DIR/artifacts"
 mkdir -p "$OUT"
-cp -a bin/targets/rtl819x/rtl8197f/*factory.bin bin/targets/rtl819x/rtl8197f/*sysupgrade.bin \
-	bin/targets/rtl819x/rtl8197f/*initramfs*.bin "$OUT/" 2>/dev/null || true
+shopt -s nullglob
+artifacts=(bin/targets/rtl819x/rtl8197f/*factory.bin bin/targets/rtl819x/rtl8197f/*sysupgrade.bin bin/targets/rtl819x/rtl8197f/*initramfs*.bin)
+shopt -u nullglob
+if [ "${#artifacts[@]}" -eq 0 ]; then
+	echo "ERROR: no firmware artifacts produced" >&2
+	exit 1
+fi
+cp -a "${artifacts[@]}" "$OUT/"
 (cd "$OUT" && sha256sum ./*.bin > sha256.txt)
 
 echo "== validate the factory image against the stock loader math"
-python3 "$REPO_ROOT/tools/bootloader-check.py" check "$OUT"/wf2409e*factory.bin
+shopt -s nullglob
+factory_bins=("$OUT"/wf2409e*factory.bin)
+shopt -u nullglob
+if [ "${#factory_bins[@]}" -ne 1 ]; then
+	echo "ERROR: expected exactly one factory image, found ${#factory_bins[@]}" >&2
+	exit 1
+fi
+python3 "$REPO_ROOT/tools/bootloader-check.py" "${factory_bins[0]}"
 
 echo "== done"
 ls -la "$OUT"

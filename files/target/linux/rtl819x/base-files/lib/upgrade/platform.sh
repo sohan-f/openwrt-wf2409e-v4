@@ -19,7 +19,7 @@ platform_check_image() {
 	local magic
 
 	case "$board" in
-	wf2409e-v4)
+	netis,wf2409e-v4)
 		magic=$(get_magic_long "$1")
 		if [ "$magic" != "63733663" ]; then
 			echo "Invalid image: expected a cs6c kernel header, got 0x$magic"
@@ -36,7 +36,7 @@ platform_do_upgrade() {
 	local kernel_mtd rootfs_mtd
 
 	case "$board" in
-	wf2409e-v4)
+	netis,wf2409e-v4)
 		[ "$(get_magic_long "$1")" = "63733663" ] || {
 			echo "platform_do_upgrade: cs6c magic missing"
 			return 1
