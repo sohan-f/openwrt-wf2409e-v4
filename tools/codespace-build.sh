@@ -124,7 +124,19 @@ if [ -z "${NO_CACHE:-}" ]; then
 	trap save_cache EXIT
 fi
 
-echo "== workspace: tree=$BUILD_DIR cache=$CACHE_DIR"
+# build.sh applies its patch stack to a pristine tree, so a tree left behind
+# by a failed run has to be rewound (ignored caches and feeds survive clean).
+if [ -d "$TREE/.git" ]; then
+	echo "== rewind $TREE to its pinned commit"
+	git -C "$TREE" reset --hard -q
+	git -C "$TREE" clean -fdq
+fi
+
+# Most package rules are serial internally and many steps are one package at
+# a time, so one job per core leaves cores idle; oversubscribe by 2x, which
+# 16 GB comfortably absorbs.
+JOBS="${JOBS:-$(( $(nproc) * 2 ))}"
+echo "== workspace: tree=$BUILD_DIR cache=$CACHE_DIR jobs=$JOBS"
 mkdir -p "$BUILD_DIR"
-FORCE_UNSAFE_CONFIGURE=1 CCACHE_MAXSIZE="$CCACHE_MAXSIZE" \
+FORCE_UNSAFE_CONFIGURE=1 CCACHE_MAXSIZE="$CCACHE_MAXSIZE" JOBS="$JOBS" \
 	BUILD_DIR="$BUILD_DIR" "$REPO_ROOT/build.sh"

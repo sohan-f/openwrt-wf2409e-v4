@@ -20,7 +20,7 @@ DONOR_COMMIT="cd3d082"
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${BUILD_DIR:-$REPO_ROOT/build}"
-JOBS="$(nproc)"
+JOBS="${JOBS:-$(nproc)}"
 
 echo "== workspace: $BUILD_DIR (jobs=$JOBS)"
 mkdir -p "$BUILD_DIR"
