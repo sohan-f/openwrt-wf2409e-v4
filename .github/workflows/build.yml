@@ -28,13 +28,27 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # dl lives inside the tree (TOPDIR/dl); build.sh carries it across the
+      # fresh clone. Loose key on purpose: stale tarballs are harmless because
+      # OpenWrt checksum-verifies every download anyway.
       - name: Cache OpenWrt downloads
         uses: actions/cache@v4
         with:
-          path: build/dl
-          key: wf2409e-v4-dl-${{ hashFiles('seed.config') }}
+          path: build/openwrt/dl
+          key: wf2409e-v4-dl-v2
           restore-keys: |
             wf2409e-v4-dl-
+
+      # staging_dir holds BOTH the host tools and the cross-toolchain — the
+      # ~2/3 of wall time that only depends on the OpenWrt pin, the build
+      # script and the endian patch. Strict key, no restore-keys: resuming
+      # from a staging dir built from different inputs would silently produce
+      # a mismatched toolchain, so any input change rebuilds it cold instead.
+      - name: Cache host tools and cross-toolchain
+        uses: actions/cache@v4
+        with:
+          path: build/openwrt/staging_dir
+          key: wf2409e-v4-toolchain-${{ hashFiles('build.sh', 'seed.config', 'patches/*.patch') }}
 
       - name: Build
         run: ./build.sh

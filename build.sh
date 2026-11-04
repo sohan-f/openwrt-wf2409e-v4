@@ -9,6 +9,8 @@
 #   4. install the packages feed (sqm-scripts, tc)
 #   5. apply our WF2409E-specific patches, copy our files/ overlay
 #   6. seed .config, make defconfig, build
+#	but: dl/ and staging_dir/ may be restored into build/openwrt beforehand
+#	by the workflow's cache steps; those must survive the re-assembly.
 set -e
 set -o pipefail
 
@@ -25,15 +27,27 @@ mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
 if [ ! -d openwrt/.git ]; then
+	# A workflow cache step may have dropped dl/ and staging_dir/ into
+	# build/openwrt before the tree existed. Carry them aside so the clone
+	# into the same path succeeds, then put them back into the fresh tree.
+	mkdir -p openwrt-carry
+	for cached in dl staging_dir; do
+		[ -d "openwrt/$cached" ] && mv "openwrt/$cached" "openwrt-carry/"
+	done
+	rm -rf openwrt
 	git clone --filter=blob:none https://github.com/openwrt/openwrt.git openwrt
+	mv openwrt-carry/* openwrt/ 2>/dev/null || true
+	rmdir openwrt-carry 2>/dev/null || true
 fi
 cd "$BUILD_DIR/openwrt"
 if [ "$OPENWRT_COMMIT" != "$(git rev-parse HEAD)" ]; then
 	echo "== openwrt checkout $OPENWRT_COMMIT"
 	git checkout -f "$OPENWRT_COMMIT"
 fi
-# Drop leftovers that would break the pinned rebuild (dl stays for the cache).
-make distclean >/dev/null 2>&1 || git clean -qfdx -e dl -e .config
+# distclean / git clean deliberately not run here: on CI this tree is a
+# fresh clone whose only pre-existing content is the restored dl/ and
+# staging_dir/ caches, and distclean deletes exactly that (staging_dir
+# IS the cached toolchain; dl is the tarball cache).
 
 cd "$BUILD_DIR"
 if [ ! -d donor/.git ]; then
