@@ -30,7 +30,7 @@
 +  CMDLINE := console=ttyS0,38400 root=/dev/mtdblock3 rootfstype=squashfs rootwait
 +  KERNEL := kernel-bin | append-dtb | lzma | loader-cmdline-compile
 +  CVIMG_KERNEL_BURN_ADDR := 0x30000
-+  CVIMG_LOADER_START_ADDR := 0x80A00000
++  CVIMG_LOADER_START_ADDR := 0x81000000
 +  IMAGES := factory.bin
 +  IMAGE/factory.bin = append-kernel | cvimg-kernel-cs6c | check-size 2949120 | pad-to 2949120 | append-rootfs | pad-rootfs | check-size
 +endef

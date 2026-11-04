@@ -1,8 +1,8 @@
 # Netis WF2409E v4 — first OpenWrt port
 
-Wired-only, SSH-only first port for the RTL8197F Netis WF2409E v4. WiFi is
-deliberately deferred. Requirements and the evidence behind every value are in
-`REQUIREMENTS.md`.
+First OpenWrt port for the RTL8197F Netis WF2409E v4: 2.4 GHz WiFi through the
+vendor `rtl8192cd` driver, plus SSH. There is no web UI. Requirements and the
+evidence behind every value are in `REQUIREMENTS.md`.
 
 There is no official OpenWrt support for this board. This tree targets the
 stock bootloader and flash layout; it does not replace the bootloader.
@@ -61,6 +61,18 @@ WAN = switch port 4 is taken from the vendor SDK (`RTL_WANPORT_MASK` is `0x10`
 in the default branch and `0x110` when the CPU port is included). This has not
 been confirmed with a link on the physical jack.
 
+## WiFi
+
+The on-SoC 2.4 GHz WMAC is driven by the vendor `rtl8192cd` module shipped in
+the ADCDS overlay. It is a WEXT driver with the WPA2-PSK handshake inside the
+driver, so mac80211 and hostapd do not apply. netifd drives it through
+`lib/netifd/wireless/rtl8192cd.sh`, which writes `/etc/Wireless/RTL8192CD.dat`.
+
+`09_wireless-wf2409e` seeds one AP on first boot: SSID
+`WF2409E-<last 4 hex of LAN MAC>`, open, 2.4 GHz, channel 6, HT20, bridged to
+`lan`. There is no 5 GHz radio: `&pcie0` is disabled and the board has no PCIe
+card.
+
 ## Image
 
 The recipe lives in `patches/0001-image-makefile.patch` (inserted inside the
@@ -70,16 +82,17 @@ The recipe lives in `patches/0001-image-makefile.patch` (inserted inside the
 - `0x2d0000` relative (`0x300000` absolute): raw squashfs rootfs
 - total capped at `7728k` (`0x78c000`), so `factory` and `netis` are untouched
 
-The loader is linked at `0x81000000`, relocates itself from `0x80a00000`
-(matching the stock header's start address), decompresses to `0x80000000`,
+The loader is linked at `0x81000000` and the image header uses that as its
+start address, so the in-place path is taken. It decompresses to `0x80000000`
 and jumps.
 
 ## Patches
 
 - `0001-image-makefile.patch` — `Build/cvimg-kernel-cs6c` and
   `Device/WF2409EV4`.
-- `0002-disable-wifi.patch` — disables `CONFIG_RTL8197F_WMAC` and
-  `CONFIG_RTL8192CD` for the wired-only build.
+- `0002-disable-wmac-bringup.patch` — disables `CONFIG_RTL8197F_WMAC`, the
+  non-beaconing bring-up driver, because `rtl8192cd` drives the same block and
+  lifts the `SR+0x64` gate itself. `CONFIG_RTL8192CD=m` stays enabled.
 - `0003-internal-switch-only.patch` — adds the DT property
   `realtek,no-external-switch`; `rtl819x-eth.c` then skips the DIR-842
   external RTL8367S RGMII-trunk bring-up and selects the internal-switch
@@ -109,8 +122,8 @@ build/openwrt/bin/targets/realtek/rtl8197f/*-WF2409EV4-squashfs-factory.bin
 ## Seed config
 
 `seed.config` selects the target, the `WF2409EV4` profile, squashfs, dropbear,
-firewall, dnsmasq, and the GPIO button/LED modules. LuCI, uhttpd, and `swconfig`
-are not included.
+firewall, dnsmasq, the GPIO button/LED modules, and `kmod-rtl8192cd`. LuCI,
+uhttpd, and `swconfig` are not included.
 
 ## First flash
 
@@ -151,4 +164,6 @@ key timing has not been verified on hardware.
   link test.
 - **MAC assignment.** WAN = `netis` offset 61, LAN = WAN + 1 is the ADCDS
   convention. The sticker is WAN + 2. Confirm against the unit's label.
-- **WiFi and sysupgrade** are not provided.
+- **WiFi bring-up** is not verified on the WF2409E yet. The driver is proven on
+  the DIR-842, but the per-unit calibration and RF path on this board are not.
+- **sysupgrade** is not provided.

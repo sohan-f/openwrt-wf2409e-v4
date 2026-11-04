@@ -1,5 +1,6 @@
 #!/bin/sh
-# Build a minimal wired-only OpenWrt image for the Netis WF2409E v4.
+# Build a minimal OpenWrt image for the Netis WF2409E v4 with the on-SoC
+# 2.4 GHz WMAC driven by the vendor rtl8192cd driver.
 #
 # Base:   ggbruno/openwrt @ 8a0ccb93 (branch Realtek, kernel 4.14, mipsel)
 # Overlay: ADCDS/openwrt-dlink-dir842-r1 @ 229536d (RTL8197F target + driver)
@@ -36,7 +37,8 @@ cp -a "$ADCDS/files/." "$OWRT/"
 
 # The ADCDS overlay is a DIR-842 R1 port. These files program the external
 # RTL8367S, its 5 GHz radio, or DIR-842-specific first-boot state; none of
-# them may run on the internal-switch-only, wired-only WF2409E.
+# them may run on the internal-switch-only WF2409E. The rtl8192cd netifd
+# handler is NOT in this list: the 2.4 GHz WMAC needs it.
 for f in \
 	etc/config/dir842 \
 	etc/sysctl.d/30-hwnat.conf \
@@ -49,8 +51,7 @@ for f in \
 	etc/uci-defaults/10_wireless-5g-ifname-dir842 \
 	etc/uci-defaults/11_dir842-htmode-ht20 \
 	etc/uci-defaults/97-dir842-l2flush-enable \
-	etc/uci-defaults/98-asic-wifi-settle-enable \
-	lib/netifd/wireless/rtl8192cd.sh
+	etc/uci-defaults/98-asic-wifi-settle-enable
 do
 	rm -f "$OWRT/target/linux/realtek/base-files/$f"
 done

@@ -57,7 +57,9 @@ Status: first-port draft, 2026-11-03. This file is the durable record.
   The vendor `rtl_set_wanport_portmapping()` also clears `1 << RTL_CPU_PORT`
   from `untagSet`, which confirms tagged CPU egress is a supported mode.
 - PCIe: disable `&pcie0` (no 5 GHz radio).
-- WMAC: keep `&wmac` disabled for the first wired-only build.
+- WMAC: keep the DT node disabled. `rtl8192cd` accesses the block at its fixed
+  address and lifts the `SR+0x64` gate itself; the `rtl8197f-wmac` bring-up
+  driver is not used.
 
 ### GPIO pins (confirmed from the vendor kernel)
 
@@ -165,17 +167,17 @@ define Device/WF2409EV4
   CMDLINE := console=ttyS0,38400 root=/dev/mtdblock3 rootfstype=squashfs rootwait
   KERNEL := kernel-bin | append-dtb | lzma | loader-cmdline-compile
   CVIMG_KERNEL_BURN_ADDR := 0x30000
-  CVIMG_LOADER_START_ADDR := 0x80A00000
+  CVIMG_LOADER_START_ADDR := 0x81000000
   IMAGES := factory.bin
   IMAGE/factory.bin = append-kernel | cvimg-kernel-cs6c | check-size 2949120 | pad-to 2949120 | append-rootfs | pad-rootfs | check-size
 endef
 TARGET_DEVICES += WF2409EV4
 ```
 
-- `CVIMG_LOADER_START_ADDR=0x80A00000` matches the stock header's start
-  address.
-- The loader is linked at `LZMA_TEXT_START=0x81000000`, relocates itself from
-  `0x80a00000`, decompresses the kernel to `LOADADDR=0x80000000`, then jumps.
+- `CVIMG_LOADER_START_ADDR=0x81000000` is the loader's link address. Loading
+  it there skips the self-relocation path; loading it at the stock `0x80a00000`
+  would also work, but the in-place path is what has been booted on hardware.
+- The loader decompresses the kernel to `LOADADDR=0x80000000`, then jumps.
 - `pad-to 2949120` (`0x2d0000`) puts the raw squashfs at absolute `0x300000`.
 - `IMAGE_SIZE=7728k` (`0x78c000`) ends at `0x7bc000`, leaving `factory` alone.
 - `check-size 2949120` fails the build if the kernel outgrows its slot;
@@ -201,10 +203,9 @@ TARGET_DEVICES += WF2409EV4
 
 ## Kernel config
 
-`patches/0002-disable-wifi.patch` disables, for the first wired-only build:
-
-- `CONFIG_RTL8197F_WMAC` (bring-up driver; WMAC node is disabled anyway)
-- `CONFIG_RTL8192CD` (vendor 2.4 GHz driver, ~1.9 MB)
+`patches/0002-disable-wmac-bringup.patch` disables `CONFIG_RTL8197F_WMAC`, the
+bring-up driver that cannot beacon; the DT node is disabled anyway.
+`CONFIG_RTL8192CD=m` is the working 2.4 GHz driver and stays enabled.
 
 Keep `CONFIG_RTL8366_SMI=y` and `CONFIG_RTL8367B_PHY=y`: `rtl819x-eth.c`
 still links against `rtl8367s_cpu_tag_enable()` / `rtl8367s_trunk_pause_set()`,
@@ -277,7 +278,8 @@ Build tree and output live under `build/`:
 - **MAC assignment**: WAN=base, LAN=base+1 is the ADCDS convention; confirm
   against the vendor `HW_NIC0_ADDR` usage if the user's unit labels WAN
   differently.
-- **WiFi deferred**: needs the vendor `rtl8192cd` driver plus per-unit
-  calibration from the router's own `netis`/factory block.
+- **WiFi on this board**: the vendor `rtl8192cd` driver is included and proven
+  on the DIR-842, but the WF2409E RF path and per-unit calibration have not been
+  tested.
 - **sysupgrade**: not provided yet. The separate kernel/rootfs layout needs a
   custom `platform.sh`; the first flash is a raw write at `0x30000`.
