@@ -29,8 +29,8 @@ PREREQS=(
 	autoconf automake bc bison build-essential ca-certificates ccache cpio
 	curl diffutils file flex gawk gettext git libelf-dev liblzma-dev
 	libncurses-dev libsnappy-dev libssl-dev libtool patch perl pkg-config
-	python3 python3-setuptools python3-yaml rsync subversion swig time unzip
-	wget xz-utils zlib1g-dev zstd
+	python3 python3-setuptools python3-yaml ripgrep rsync subversion swig time
+	unzip wget xz-utils zlib1g-dev zstd
 )
 
 # The universal image ships ~5 GB of language runtimes this build never
@@ -44,8 +44,8 @@ SLIM_PATHS=(
 install_prereqs() {
 	local p missing=()
 	for p in "${PREREQS[@]}"; do
-		dpkg-query -W -f='${Status}' "$p" 2>/dev/null |
-			rg -q '^install ok installed$' || missing+=("$p")
+		[ "$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null)" = "install ok installed" ] ||
+			missing+=("$p")
 	done
 	if [ "${#missing[@]}" -ne 0 ]; then
 		echo "== installing build prerequisites: ${missing[*]}"
