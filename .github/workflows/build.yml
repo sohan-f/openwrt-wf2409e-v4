@@ -1,31 +1,27 @@
-name: Build WF2409E v4 image
+name: Build WF2409E v4 OpenWrt
 
 on:
-  workflow_dispatch:
   push:
-    branches: [main]
+    branches: [wf2409e-v4]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: debian:bullseye
-    timeout-minutes: 360
+    timeout-minutes: 300
     env:
-      # Container jobs run as root; GNU tar's configure refuses that by default.
+      # Container jobs run as root; GNU tar's configure refuses that otherwise.
       FORCE_UNSAFE_CONFIGURE: 1
 
     steps:
-      - name: Point apt at the Debian archive
-        run: |
-          perl -pi -e 's|deb\.debian\.org|archive.debian.org|g' /etc/apt/sources.list
-          apt-get -o Acquire::Check-Valid-Until=false update
-
       - name: Install build dependencies
         run: |
-          apt-get install -y --no-install-recommends \
-            bc bison build-essential ca-certificates curl diffutils file flex \
-            gawk gettext git libelf-dev libncurses-dev libssl-dev patch \
-            perl python3 python3-distutils rsync unzip wget zlib1g-dev
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ca-certificates ccache clang curl diffutils \
+            file flex gawk gettext git libelf-dev libncurses-dev libsnappy-dev \
+            libssl-dev libtool lld llvm patch perl python3 python3-distutils \
+            python3-setuptools rsync subversion swig unzip wget xz-utils zlib1g-dev
 
       - uses: actions/checkout@v4
 
@@ -33,16 +29,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/dl
-          key: wf2409e-dl-v1
+          key: wf2409e-v4-dl-${{ hashFiles('seed.config') }}
           restore-keys: |
-            wf2409e-dl-
+            wf2409e-v4-dl-
 
-      - name: Build image
+      - name: Build
         run: ./build.sh
 
-      - name: Upload image
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: wf2409e-v4-openwrt
-          path: build/openwrt/bin/targets/realtek/rtl8197f/*WF2409EV4*
+          name: wf2409e-v4-images
+          path: |
+            build/artifacts/
           if-no-files-found: error
