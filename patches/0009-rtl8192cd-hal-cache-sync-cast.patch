@@ -1,0 +1,22 @@
+HAL_CACHE_SYNC_WBACK: cast bus_to_virt() to the helper's address type
+
+rtl_cache_sync_wback() takes a virtual address as unsigned long (it feeds
+CPHYSADDR()/dma_cache_*(), and every direct caller already casts the
+bus_to_virt() result). The HAL macro passed the raw void* and GCC 14
+rejects the pointer-to-integer conversion, which aborted the WlanHAL
+compile on 6.18. Cast at the macro, next to the call, rather than changing
+bus_to_virt(): other callers do dereference it.
+
+diff --git a/package/kernel/rtl8192cd/src/WlanHAL/HalCfg.h b/package/kernel/rtl8192cd/src/WlanHAL/HalCfg.h
+index feca2a9..9bcf4f4 100644
+--- a/package/kernel/rtl8192cd/src/WlanHAL/HalCfg.h
++++ b/package/kernel/rtl8192cd/src/WlanHAL/HalCfg.h
+@@ -1729,7 +1729,7 @@ typedef struct stat_info        _HAL_STA_INFO,*P_HAL_STA_INFO;
+ #define HAL_PCI_DMA_FROMDEVICE    PCI_DMA_FROMDEVICE
+ 
+ #ifdef CONFIG_NET_PCI
+-#define HAL_CACHE_SYNC_WBACK(Adapter, start, size, direction)   rtl_cache_sync_wback(Adapter, bus_to_virt(start), size, direction)
++#define HAL_CACHE_SYNC_WBACK(Adapter, start, size, direction)   rtl_cache_sync_wback(Adapter, (unsigned long)bus_to_virt(start), size, direction)
+ #else
+ #define HAL_CACHE_SYNC_WBACK(Adapter, start, size, direction)   rtl_cache_sync_wback(Adapter, start, size, direction)
+ #endif

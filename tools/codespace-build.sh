@@ -79,7 +79,10 @@ save_cache() {
 	local rc=$?
 	set +e
 	echo "== save caches to $CACHE_DIR"
-	mkdir -p "$CACHE_DIR"
+	# rsync creates the leaf but not missing parents; every path below is
+	# nested one level deeper than $CACHE_DIR.
+	mkdir -p "$CACHE_DIR" "$CACHE_DIR/build_dir" "$CACHE_DIR/dl" \
+		"$CACHE_DIR/ccache" "$CACHE_DIR/artifacts"
 	if [ -d "$TREE/staging_dir" ]; then
 		rsync -a --delete "$TREE/staging_dir/" "$CACHE_DIR/staging_dir/"
 	fi
