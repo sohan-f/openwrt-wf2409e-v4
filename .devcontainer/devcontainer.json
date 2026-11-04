@@ -1,0 +1,10 @@
+{
+  "name": "openwrt-wf2409e-v4",
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "16gb",
+    "storage": "32gb"
+  },
+  "postCreateCommand": "tools/codespace-build.sh --setup-only"
+}

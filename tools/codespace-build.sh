@@ -16,7 +16,7 @@
 # A restart then costs one local rsync instead of a toolchain rebuild plus a
 # cold kernel/package compile.
 #
-# Usage: tools/codespace-build.sh [--no-cache] [--prereqs-only]
+# Usage: tools/codespace-build.sh [--no-cache] [--setup-only]
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,18 +33,26 @@ PREREQS=(
 	wget xz-utils zlib1g-dev zstd
 )
 
+# The universal image ships ~5 GB of language runtimes this build never
+# touches. Reclaimed on every container rebuild, hence part of setup.
+SLIM_PATHS=(
+	/opt/conda /usr/share/dotnet /opt/dotnet /usr/local/sdkman
+	/usr/local/rubies /usr/local/php /usr/local/go /go /usr/local/hugo
+	/usr/local/py-utils /usr/local/buildscriptgen /usr/local/python/3.13.8
+)
+
 install_prereqs() {
 	local p missing=()
 	for p in "${PREREQS[@]}"; do
 		dpkg-query -W -f='${Status}' "$p" 2>/dev/null |
 			rg -q '^install ok installed$' || missing+=("$p")
 	done
-	if [ "${#missing[@]}" -eq 0 ]; then
-		return 0
+	if [ "${#missing[@]}" -ne 0 ]; then
+		echo "== installing build prerequisites: ${missing[*]}"
+		sudo apt-get update -qq
+		sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
 	fi
-	echo "== installing build prerequisites: ${missing[*]}"
-	sudo apt-get update -qq
-	sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+	sudo rm -rf "${SLIM_PATHS[@]}"
 }
 
 restore_cache() {
@@ -98,7 +106,7 @@ save_cache() {
 }
 
 case "${1:-}" in
---prereqs-only)
+--setup-only)
 	install_prereqs
 	exit 0
 	;;
