@@ -65,11 +65,11 @@ def main():
         ok = False
 
     if kind == 2:
-        # cr6c: check_rootfs_image() treats the u32 at rootfs+8 as a length.
-        # A plain squashfs has mkfs_time there, so this sums tens of MB of
-        # flash and always fails. OpenWrt cannot satisfy it without reserving
-        # a vendor trailer inside the writable overlay.
-        declared = struct.unpack("<I", blob[args.rootfs_offset + 8:args.rootfs_offset + 12])[0]
+        # cr6c: check_rootfs_image() byte-swaps the u32 at rootfs+8, so it is
+        # big-endian. A plain squashfs has mkfs_time there, so this sums tens
+        # of MB of flash and always fails. OpenWrt cannot satisfy it without
+        # reserving a vendor trailer inside the writable overlay.
+        declared = struct.unpack(">I", blob[args.rootfs_offset + 8:args.rootfs_offset + 12])[0]
         region = declared + ROOTFS_TRAILER
         if args.rootfs_offset + region > len(blob):
             total = -1
