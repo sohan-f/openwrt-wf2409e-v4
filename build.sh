@@ -89,7 +89,14 @@ cp "$REPO_ROOT/seed.config" .config
 make defconfig
 
 echo "== build"
-make -j"$JOBS"
+if ! make -j"$JOBS"; then
+	# Parallel make swallows per-package compiler output behind one summary
+	# line ("ERROR: package/x failed to build"); re-run linearly and verbose
+	# to surface the real error. Incremental: make only (re)builds what the
+	# parallel run left incomplete, starting at the failing package.
+	echo "== build failed; retrying single-threaded and verbose to capture the error"
+	make -j1 V=s
+fi
 
 echo "== collect artifacts"
 OUT="$BUILD_DIR/artifacts"

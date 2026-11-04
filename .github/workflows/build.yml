@@ -40,15 +40,23 @@ jobs:
             wf2409e-v4-dl-
 
       # staging_dir holds BOTH the host tools and the cross-toolchain — the
-      # ~2/3 of wall time that only depends on the OpenWrt pin, the build
-      # script and the endian patch. Strict key, no restore-keys: resuming
-      # from a staging dir built from different inputs would silently produce
-      # a mismatched toolchain, so any input change rebuilds it cold instead.
+      # ~2/3 of wall time that only depends on the OpenWrt pin and the endian
+      # patch. Strict key, no restore-keys: resuming from a staging dir built
+      # from different inputs would silently produce a mismatched toolchain,
+      # so any input change rebuilds it cold instead.
+      #
+      # Key lists toolchain-determining inputs ONLY: the tree pin inside
+      # build.sh and the 0001 endian patch (ARCH, config-6.18). Patches
+      # 0002..0005 touch DTS / board metadata / image recipes and cannot
+      # affect the toolchain or kernel headers — listing them (or seed.config
+      # package selections) would invalidate the cache on every bring-up fix.
+      # EXTEND THIS LIST if a patch ever starts touching kernel include/uapi
+      # or anything the toolchain consumes.
       - name: Cache host tools and cross-toolchain
         uses: actions/cache@v4
         with:
           path: build/openwrt/staging_dir
-          key: wf2409e-v4-toolchain-${{ hashFiles('build.sh', 'seed.config', 'patches/*.patch') }}
+          key: wf2409e-v4-toolchain-${{ hashFiles('build.sh', 'patches/0001-*.patch') }}
 
       - name: Build
         run: ./build.sh
