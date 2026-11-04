@@ -1,0 +1,52 @@
+From f530021d77fa5420e2e12c4a8ce1c7abdb095730 Mon Sep 17 00:00:00 2001
+From: wb <wb@local>
+Date: Wed, 4 Nov 2026 21:48:08 +0000
+Subject: [PATCH] rtl8192cd: fix PrepareTXBD88XX 8197F beacon ring setup
+
+Two hard errors in the one TU the vendor CI never compiled for 8197F:
+
+- TXBD_BEACON_OFFSET_8197F is defined only inside a disabled preprocessor
+  block in HalCfg.h (the per-chip beacon-offset defines the vendor turned
+  off wholesale), so the IS_RTL8197F_SERIES branch references an
+  identifier that can never exist. Use TXBD_BEACON_OFFSET_V1, which is
+  the same HW-fixed value (128) and the symbol every other chip series
+  in this function already uses.
+- the beacon TXBD cursor assignment drops the outer struct cast: assign
+  through (PTX_BUFFER_DESCRIPTOR) exactly like the sibling sites at
+  line 1029 of the same file (compiled) and in the V1 twin (dead here:
+  IS_RTL88XX_MAC_V3_V4 is false because our HAL base is RTL8197F only).
+
+Signed-off-by: Sohan Ali <96324905+sohan-f@users.noreply.github.com>
+---
+ .../kernel/rtl8192cd/src/WlanHAL/RTL88XX/Hal88XXTxDesc.c  | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/package/kernel/rtl8192cd/src/WlanHAL/RTL88XX/Hal88XXTxDesc.c b/package/kernel/rtl8192cd/src/WlanHAL/RTL88XX/Hal88XXTxDesc.c
+index 4aa265f..e3f73c9 100644
+--- a/package/kernel/rtl8192cd/src/WlanHAL/RTL88XX/Hal88XXTxDesc.c
++++ b/package/kernel/rtl8192cd/src/WlanHAL/RTL88XX/Hal88XXTxDesc.c
+@@ -705,9 +705,9 @@ PrepareTXBD88XX(
+ #if IS_RTL8197F_SERIES
+     if (IS_HARDWARE_TYPE_8197F(Adapter)) {
+         ptxdesc_bcn_head = (PTX_DESC_88XX)((pu1Byte)ptxbd_bcn_head + \
+-                                (1+HAL_NUM_VWLAN) * TXBD_BEACON_OFFSET_8197F);
+-        beacon_offset = TXBD_BEACON_OFFSET_8197F;
+-        tmp_tx_dma_ring_addr4 = tmp_tx_dma_ring_addr3+(1+HAL_NUM_VWLAN) * TXBD_BEACON_OFFSET_8197F;
++                                (1+HAL_NUM_VWLAN) * TXBD_BEACON_OFFSET_V1);
++        beacon_offset = TXBD_BEACON_OFFSET_V1;
++        tmp_tx_dma_ring_addr4 = tmp_tx_dma_ring_addr3+(1+HAL_NUM_VWLAN) * TXBD_BEACON_OFFSET_V1;
+     }
+ #endif
+ 
+@@ -800,7 +800,7 @@ PrepareTXBD88XX(
+             // beacon...
+             for (i = 0; i < 1+HAL_NUM_VWLAN; i++)
+             {
+-                ptxbd_bcn_cur = (pu1Byte)ptxbd + beacon_offset * i;
++                ptxbd_bcn_cur = (PTX_BUFFER_DESCRIPTOR)((pu1Byte)ptxbd + beacon_offset * i);
+                 SET_DESC_FIELD_CLR(ptxbd_bcn_cur->TXBD_ELE[0].Dword0, \
+                         TXDESCSize, \
+                         TXBD_DW0_TXBUFSIZE_MSK, TXBD_DW0_TXBUFSIZE_SH);
+-- 
+2.53.0
+
