@@ -27,11 +27,12 @@ mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
 if [ ! -d openwrt/.git ]; then
-	# A workflow cache step may have dropped dl/ and staging_dir/ into
+	# A workflow cache step may have dropped dl/, staging_dir/, and the
+	# host/toolchain build_dir subtrees into
 	# build/openwrt before the tree existed. Carry them aside so the clone
 	# into the same path succeeds, then put them back into the fresh tree.
 	mkdir -p openwrt-carry
-	for cached in dl staging_dir; do
+	for cached in dl staging_dir build_dir; do
 		[ -d "openwrt/$cached" ] && mv "openwrt/$cached" "openwrt-carry/"
 	done
 	rm -rf openwrt
@@ -86,7 +87,17 @@ cp -a "$REPO_ROOT/files/etc/." files/
 
 echo "== seed config"
 cp "$REPO_ROOT/seed.config" .config
+printf '%s\n' \
+	'CONFIG_DEVEL=y' \
+	'CONFIG_CCACHE=y' \
+	"CONFIG_CCACHE_DIR=\"$BUILD_DIR/ccache\"" >> .config
 make defconfig
+
+# Build the toolchain as a distinct phase so CI can preserve staging_dir
+# before the much larger kernel and package build begins.
+echo "== build host tools and cross-toolchain"
+make -j"$JOBS" toolchain/install
+touch staging_dir/.wf2409e-toolchain-ready
 
 echo "== build"
 if ! make -j"$JOBS"; then

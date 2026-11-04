@@ -12,10 +12,25 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 300
     env:
-      # Container jobs run as root; GNU tar's configure refuses that otherwise.
       FORCE_UNSAFE_CONFIGURE: 1
+      CCACHE_MAXSIZE: 2G
 
     steps:
+      - name: Clean up runner disk space
+        uses: endersonmenezes/free-disk-space@v4
+        with:
+          remove_android: true
+          remove_dotnet: true
+          remove_haskell: true
+          remove_tool_cache: true
+          remove_swap: true
+          remove_packages: "azure-cli google-cloud-cli microsoft-edge-stable google-chrome-stable firefox postgresql* temurin-* *llvm* mysql* dotnet-sdk-*"
+          remove_packages_one_command: true
+          remove_folders: "/usr/share/swift /usr/share/miniconda /usr/share/az* /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell /usr/local/julia /usr/local/aws-cli /usr/local/aws-sam-cli /usr/share/gradle"
+          rm_cmd: "rmz"
+          rmz_version: "3.2.0"
+          testing: false
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -39,11 +54,10 @@ jobs:
           restore-keys: |
             wf2409e-v4-dl-
 
-      # staging_dir holds BOTH the host tools and the cross-toolchain — the
-      # ~2/3 of wall time that only depends on the OpenWrt pin and the endian
-      # patch. Strict key, no restore-keys: resuming from a staging dir built
-      # from different inputs would silently produce a mismatched toolchain,
-      # so any input change rebuilds it cold instead.
+      # staging_dir holds installed host tools/cross-toolchain; build_dir's
+      # host and toolchain subtrees hold their build stamps and intermediates.
+      # Cache both so make toolchain/install can be a true no-op on a hit.
+      # Strict key, no restore-keys: inputs must match exactly.
       #
       # Key lists toolchain-determining inputs ONLY: the tree pin inside
       # build.sh and the 0001 endian patch (ARCH, config-6.18). Patches
@@ -52,16 +66,57 @@ jobs:
       # package selections) would invalidate the cache on every bring-up fix.
       # EXTEND THIS LIST if a patch ever starts touching kernel include/uapi
       # or anything the toolchain consumes.
-      - name: Cache host tools and cross-toolchain
-        uses: actions/cache@v4
+      - name: Restore host tools and cross-toolchain
+        id: toolchain-cache
+        uses: actions/cache/restore@v5
         with:
-          path: build/openwrt/staging_dir
+          path: |
+            build/openwrt/staging_dir
+            build/openwrt/build_dir/host
+            build/openwrt/build_dir/toolchain-*
           key: wf2409e-v4-toolchain-${{ hashFiles('build.sh', 'patches/0001-*.patch') }}
+
+      # Compiler results are content-addressed by ccache, so a broad restore
+      # prefix is safe across source/config changes. A new run key lets the
+      # cache grow after each build; ccache itself is capped at 2 GB above.
+      - name: Restore compiler cache
+        id: ccache-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: build/ccache
+          key: wf2409e-v4-ccache-${{ github.run_id }}
+          restore-keys: wf2409e-v4-ccache-
 
       - name: Build
         run: ./build.sh
 
+      # Firmware artifacts are already copied to build/artifacts by build.sh.
+      # Drop the large target-side intermediates before cache archives are made.
+      - name: Free space before saving caches
+        if: always()
+        run: rm -rf build/openwrt/build_dir/target-* build/openwrt/bin build/openwrt/logs
+
+      # Save as soon as toolchain/install has completed, even when a later
+      # kernel/package/image step fails.
+      - name: Save host tools and cross-toolchain
+        if: always() && steps.toolchain-cache.outputs.cache-hit != 'true' && hashFiles('build/openwrt/staging_dir/.wf2409e-toolchain-ready') != ''
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            build/openwrt/staging_dir
+            build/openwrt/build_dir/host
+            build/openwrt/build_dir/toolchain-*
+          key: ${{ steps.toolchain-cache.outputs.cache-primary-key }}
+
+      - name: Save compiler cache
+        if: always() && steps.ccache-cache.outputs.cache-hit != 'true' && hashFiles('build/ccache/**') != ''
+        uses: actions/cache/save@v5
+        with:
+          path: build/ccache
+          key: ${{ steps.ccache-cache.outputs.cache-primary-key }}
+
       - name: Upload artifacts
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: wf2409e-v4-images
