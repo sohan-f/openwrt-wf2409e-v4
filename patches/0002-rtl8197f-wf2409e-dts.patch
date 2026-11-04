@@ -1,0 +1,140 @@
+From 0672289559ea4432618531fc94b8ea51e4bf2fc2 Mon Sep 17 00:00:00 2001
+From: wb <wb@local>
+Date: Wed, 4 Nov 2026 12:44:30 +0000
+Subject: [PATCH] wf2409e-dts
+
+Signed-off-by: Sohan Ali <96324905+sohan-f@users.noreply.github.com>
+---
+ .../linux/rtl819x/dts/rtl8197f-wf2409ev4.dts  | 120 ++++++++++++++++++
+ 1 file changed, 120 insertions(+)
+ create mode 100644 target/linux/rtl819x/dts/rtl8197f-wf2409ev4.dts
+
+diff --git a/target/linux/rtl819x/dts/rtl8197f-wf2409ev4.dts b/target/linux/rtl819x/dts/rtl8197f-wf2409ev4.dts
+new file mode 100644
+index 0000000..a9967b9
+--- /dev/null
++++ b/target/linux/rtl819x/dts/rtl8197f-wf2409ev4.dts
+@@ -0,0 +1,120 @@
++// SPDX-License-Identifier: GPL-2.0-only OR MIT
++
++/dts-v1/;
++
++#include "rtl8197f.dtsi"
++#include <dt-bindings/gpio/gpio.h>
++
++/ {
++	model = "Netis WF2409E v4";
++	compatible = "netis,wf2409e-v4", "realtek,rtl8197f";
++
++	memory@0 {
++		device_type = "memory";
++		reg = <0x00000000 0x04000000>;
++	};
++
++	/*
++	 * SoC GPIO, ports A-D bank (PABCD) of the RTL8197F GPIO block at
++	 * 0x18003500. Same generic mapping the A2004MU uses; LED/button
++	 * wiring is not yet verified for this board, so no board-specific
++	 * consumers are declared yet.
++	 */
++	gpio: gpio@1800350c {
++		compatible = "brcm,bcm6345-gpio";
++		reg = <0x1800350c 0x4>, <0x18003508 0x4>;
++		reg-names = "dat", "dirout";
++		gpio-controller;
++		#gpio-cells = <2>;
++		ngpios = <32>;
++	};
++};
++
++&spi0 {
++	flash@0 {
++		/*
++		 * Netis WF2409E v4 stock layout, derived from the friend's
++		 * working unit /proc/mtd plus a byte-level analysis of its
++		 * mtd blocks: boot region 0x0..0x20000, config 0x20000, kernel
++		 * header+payload at 0x30000 (cr6c, start 0x80a00000), squashfs
++		 * rootfs from 0x300000 to the netis data block at 0x7f8000.
++		 * The netis block holds the per-unit MAC at offset 0x3d.
++		 */
++		partitions {
++			compatible = "fixed-partitions";
++			#address-cells = <1>;
++			#size-cells = <1>;
++
++			partition@0 {
++				label = "bootloader";
++				reg = <0x00000000 0x00020000>;
++				read-only;
++			};
++
++			partition@20000 {
++				label = "config";
++				reg = <0x00020000 0x00010000>;
++				read-only;
++			};
++
++			partition@30000 {
++				label = "kernel";
++				reg = <0x00030000 0x002d0000>;
++			};
++
++			partition@300000 {
++				label = "rootfs";
++				reg = <0x00300000 0x004f8000>;
++			};
++
++			netis: partition@7f8000 {
++				label = "netis";
++				reg = <0x007f8000 0x00004000>;
++				read-only;
++
++				nvmem-layout {
++					compatible = "fixed-layout";
++					#address-cells = <1>;
++					#size-cells = <1>;
++
++					macaddr_netis: mac-address@3d {
++						reg = <0x0000003d 0x6>;
++					};
++				};
++			};
++
++			partition@7fc000 {
++				label = "reserved";
++				reg = <0x007fc000 0x00004000>;
++				read-only;
++			};
++		};
++	};
++};
++
++&eth0 {
++	/*
++	 * No "realtek,dsa-conduit" here: this board has no external switch,
++	 * so the ethernet driver programs the internal fabric's VLAN tables
++	 * directly (board patch 0003) instead of acting as a DSA conduit.
++	 */
++	nvmem-cells = <&macaddr_netis>;
++	nvmem-cell-names = "mac-address";
++};
++
++&wifi2g {
++	/*
++	 * No "calibration" nvmem cell: with the cell absent the rtl8192cd
++	 * driver reads RF calibration from the on-chip EFUSE.
++	 */
++	status = "okay";
++};
++
++&pcie {
++	/*
++	 * The WF2409E has no mini-PCIe card (its only radio is the integrated
++	 * 2.4 GHz one); disabling the root port keeps the unused controller
++	 * powered down.
++	 */
++	status = "disabled";
++};
+-- 
+2.53.0
+

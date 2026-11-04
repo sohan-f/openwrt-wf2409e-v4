@@ -1,0 +1,44 @@
+#!/bin/sh
+# Netis WF2409E v4 board network setup.
+#
+# Single eth0 conduit: VID 1 = WAN (phys port 4), VID 2 = LAN (phys ports
+# 0-3), CPU egress tagged. The rtl8197f_eth driver programs those tables
+# (target patch 0003), this board file only wires netifd and the per-unit
+# MACs: WAN = netis@61 (the stock base MAC), LAN = base+1, WMAC = base+2.
+[ -e /etc/config/board_check ] || true
+
+. /lib/functions.sh
+. /lib/functions/uci-defaults.sh
+. /lib/functions/system.sh
+
+board_config_update
+board=$(board_name)
+
+case "$board" in
+netis,wf2409e-v4)
+	ucidef_set_interfaces_lan_wan "eth0.2" "eth0.1"
+
+	wan_mac=""
+	if wan_mac=$(mtd_get_mac_binary netis 0x3d); then
+		[ -n "$wan_mac" ] || wan_mac=""
+	fi
+	case "$wan_mac" in
+	[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F])
+		lan_mac=$(macaddr_add "$wan_mac" 1)
+		ucidef_set_network_device_mac "eth0.1" "$wan_mac"
+		ucidef_set_network_device_mac "eth0.2" "$lan_mac"
+		;;
+	*)
+		# A bad netis block must NOT default to a fixed MAC: leave both
+		# devices unspecified so the kernel keeps the driver's MAC.
+		;;
+	esac
+	;;
+*)
+	ucidef_set_interfaces_lan_wan "lan" "wan"
+	;;
+esac
+
+board_config_flush
+
+exit 0

@@ -1,0 +1,12 @@
+# Netis WF2409E v4 SQM defaults (CAKE, mandatory — shipped as this file,
+# there is no luci-app-sqm: the file IS the template). Tune rates after
+# install: download/upload '0' lets CAKE's autodetect mode run.
+config queue
+	option enabled '1'
+	option interface 'eth0.1'
+	option download '0'
+	option upload '0'
+	option overhead '0'
+	option linklayer 'ethernet'
+	option qdisc 'cake'
+	option debug '0'

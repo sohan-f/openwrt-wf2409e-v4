@@ -1,83 +1,91 @@
-#!/bin/sh
-# Build a minimal OpenWrt image for the Netis WF2409E v4 with the on-SoC
-# 2.4 GHz WMAC driven by the vendor rtl8192cd driver.
+#!/usr/bin/env bash
+# Assemble and build the OpenWrt firmware for the Netis WF2409E v4.
 #
-# Base:   ggbruno/openwrt @ 8a0ccb93 (branch Realtek, kernel 4.14, mipsel)
-# Overlay: ADCDS/openwrt-dlink-dir842-r1 @ 229536d (RTL8197F target + driver)
-# Then:   this directory's files/ + patches/
-#
-# Use a Debian 11 (bullseye) host or container. The 2020 tree does not build
-# with current host tools.
-set -eu
+# The tree is assembled fresh on every run (from pinned commits), so the
+# local exhibit never accumulates stale state:
+#   1. clone OpenWrt master at $OPENWRT_COMMIT
+#   2. clone the donor RTL8197F port at $DONOR_COMMIT
+#   3. apply the donor's consolidated patch + copy its rtl8192cd package
+#   4. install the packages feed (sqm-scripts, tc)
+#   5. apply our WF2409E-specific patches, copy our files/ overlay
+#   6. seed .config, make defconfig, build
+set -e
+set -o pipefail
 
-SELF=$(cd "$(dirname "$0")" && pwd)
-BUILD=${BUILD_DIR:-$SELF/build}
-OWRT=$BUILD/openwrt
-ADCDS=$BUILD/adcds
+OPENWRT_COMMIT="6e9fd1c3ba6bf486a044ed9d640a77dd50b6cbc2"
+DONOR_REPO="https://github.com/Putpocket/iptime-a2004mu-openwrt.git"
+DONOR_COMMIT="cd3d082"
 
-if [ -e "$OWRT" ]; then
-	echo "ERROR: $OWRT already exists; remove it first." >&2
-	exit 1
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+BUILD_DIR="${BUILD_DIR:-$REPO_ROOT/build}"
+JOBS="$(nproc)"
+
+echo "== workspace: $BUILD_DIR (jobs=$JOBS)"
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
+
+if [ ! -d openwrt/.git ]; then
+	git clone --filter=blob:none https://github.com/openwrt/openwrt.git openwrt
 fi
-mkdir -p "$BUILD"
+cd "$BUILD_DIR/openwrt"
+if [ "$OPENWRT_COMMIT" != "$(git rev-parse HEAD)" ]; then
+	echo "== openwrt checkout $OPENWRT_COMMIT"
+	git checkout -f "$OPENWRT_COMMIT"
+fi
+# Drop leftovers that would break the pinned rebuild (dl stays for the cache).
+make distclean >/dev/null 2>&1 || git clean -qfdx -e dl -e .config
 
-git clone https://github.com/ggbruno/openwrt "$OWRT"
-git -C "$OWRT" checkout 8a0ccb93f3431bcf8f5c5d03d4acc2c8e442de67
+cd "$BUILD_DIR"
+if [ ! -d donor/.git ]; then
+	git clone --filter=blob:none "$DONOR_REPO" donor
+fi
+cd "$BUILD_DIR/donor"
+if [ "$DONOR_COMMIT" != "$(git rev-parse HEAD)" ]; then
+	echo "== donor checkout $DONOR_COMMIT"
+	git checkout -f "$DONOR_COMMIT"
+fi
 
-git clone https://github.com/ADCDS/openwrt-dlink-dir842-r1 "$ADCDS"
-git -C "$ADCDS" checkout 229536d89c25a676417717304fcef386a53a7875
+cd "$BUILD_DIR/openwrt"
+echo "== apply donor patch"
+git apply --check "$BUILD_DIR/donor/patches/openwrt/0001-iptime-a2004mu-rtl8197f-support.patch"
+git apply "$BUILD_DIR/donor/patches/openwrt/0001-iptime-a2004mu-rtl8197f-support.patch"
+cp -a "$BUILD_DIR/donor/package/kernel/rtl8192cd" package/kernel/rtl8192cd
 
-# Keep downloads outside $OWRT so a CI cache of $BUILD/dl never makes the
-# "OWRT already exists" check fire before the clone.
-mkdir -p "$BUILD/dl"
-rm -rf "$OWRT/dl"
-ln -s "$BUILD/dl" "$OWRT/dl"
+echo "== update feeds (packages feed provides sqm-scripts)"
+./scripts/feeds update -a
+./scripts/feeds install -a -p packages sqm-scripts
 
-cp -a "$ADCDS/files/." "$OWRT/"
-
-# The ADCDS overlay is a DIR-842 R1 port. These files program the external
-# RTL8367S, its 5 GHz radio, or DIR-842-specific first-boot state; none of
-# them may run on the internal-switch-only WF2409E. The rtl8192cd netifd
-# handler is NOT in this list: the 2.4 GHz WMAC needs it.
-for f in \
-	etc/config/dir842 \
-	etc/sysctl.d/30-hwnat.conf \
-	etc/sysctl.d/31-dir842-lowmem.conf \
-	etc/uci-defaults/99-dir842-m5 \
-	etc/init.d/asic-wifi-settle \
-	etc/init.d/dir842-asic \
-	etc/init.d/dir842-l2flush \
-	etc/uci-defaults/09_wireless-dualband-dir842 \
-	etc/uci-defaults/10_wireless-5g-ifname-dir842 \
-	etc/uci-defaults/11_dir842-htmode-ht20 \
-	etc/uci-defaults/97-dir842-l2flush-enable \
-	etc/uci-defaults/98-asic-wifi-settle-enable
-do
-	rm -f "$OWRT/target/linux/realtek/base-files/$f"
+echo "== apply WF2409E patches"
+for patch in "$REPO_ROOT"/patches/*.patch; do
+	echo "-- $(basename "$patch")"
+	git apply --check "$patch"
+	git apply "$patch"
 done
 
-cp -a "$SELF/files/." "$OWRT/"
+echo "== copy files/ overlays"
+# files/target/* lands in the target tree (board.d, uci-defaults, upgrade).
+# files/etc is the rootfs overlay (sqm config template) minimally disconnected
+# from the sqm-scripts default at install time.
+cp -a "$REPO_ROOT/files/target/." target/
+mkdir -p files/etc/config
+cp -a "$REPO_ROOT/files/etc/." files/
 
-for p in "$SELF"/patches/*.patch; do
-	echo ">>> applying $(basename "$p")"
-	patch -d "$OWRT" -p1 < "$p"
-done
+echo "== seed config"
+cp "$REPO_ROOT/seed.config" .config
+make defconfig
 
-cp "$SELF/seed.config" "$OWRT/.config"
-make -C "$OWRT" defconfig
+echo "== build"
+make -j"$JOBS"
 
-awk '/^CONFIG_TARGET_realtek_rtl8197f_DEVICE_WF2409EV4=y$/{f=1} END{exit !f}' \
-	"$OWRT/.config" || {
-	echo "ERROR: WF2409EV4 profile was not selected." >&2
-	exit 1
-}
+echo "== collect artifacts"
+OUT="$BUILD_DIR/artifacts"
+mkdir -p "$OUT"
+cp -a bin/targets/rtl819x/rtl8197f/*factory.bin bin/targets/rtl819x/rtl8197f/*sysupgrade.bin \
+	bin/targets/rtl819x/rtl8197f/*initramfs*.bin "$OUT/" 2>/dev/null || true
+(cd "$OUT" && sha256sum ./*.bin > sha256.txt)
 
-# Host tools first, verbosely: a tool build failure is otherwise reported only
-# as "re-run with V=s" because the parallel build swallows the compiler output.
-make -C "$OWRT" tools/compile V=s
-make -C "$OWRT" -j"${JOBS:-$(nproc)}"
+echo "== validate the factory image against the stock loader math"
+python3 "$REPO_ROOT/tools/bootloader-check.py" check "$OUT"/wf2409e*factory.bin
 
-echo
-echo "Images: $OWRT/bin/targets/realtek/rtl8197f/"
-echo "Flash factory.bin at NOR offset 0x30000. Do not touch 0x0..0x30000,"
-echo "0x7bc000..0x7f8000, or 0x7f8000..0x800000."
+echo "== done"
+ls -la "$OUT"

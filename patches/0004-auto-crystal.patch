@@ -1,9 +1,0 @@
---- a/target/linux/realtek/files-4.14/drivers/net/wireless/rtl8192cd/Makefile
-+++ b/target/linux/realtek/files-4.14/drivers/net/wireless/rtl8192cd/Makefile
-@@ -307,3 +307,6 @@
- # ccflags-y += -DCONFIG_PHY_EAT_40MHZ
-+# Do not hardcode the crystal: the stock WF2409E kernel reads the bootstrap
-+# strap SR+0x08 BIT(24) and picks 25 or 40 MHz at run time (vmlinux:0x802272b4).
-+ccflags-y += -DCONFIG_AUTO_PCIE_PHY_SCAN
- # (G4) ccflags-y += -DCONFIG_RTL_5G_SLOT_0
- ccflags-y += -DCONFIG_RTL_CLIENT_MODE_SUPPORT

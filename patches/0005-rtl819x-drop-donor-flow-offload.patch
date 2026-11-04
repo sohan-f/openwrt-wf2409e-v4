@@ -1,0 +1,28 @@
+From b38e6445d52f40a1f79656e61d8aa125806d3cf8 Mon Sep 17 00:00:00 2001
+From: wb <wb@local>
+Date: Wed, 4 Nov 2026 12:53:05 +0000
+Subject: [PATCH] drop-donor-flow-offload
+
+Signed-off-by: Sohan Ali <96324905+sohan-f@users.noreply.github.com>
+---
+ .../base-files/etc/uci-defaults/05_enable_flow_offloading | 8 --------
+ 1 file changed, 8 deletions(-)
+ delete mode 100755 target/linux/rtl819x/base-files/etc/uci-defaults/05_enable_flow_offloading
+
+diff --git a/target/linux/rtl819x/base-files/etc/uci-defaults/05_enable_flow_offloading b/target/linux/rtl819x/base-files/etc/uci-defaults/05_enable_flow_offloading
+deleted file mode 100755
+index 73cad95..0000000
+--- a/target/linux/rtl819x/base-files/etc/uci-defaults/05_enable_flow_offloading
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# SPDX-License-Identifier: GPL-2.0-only
+-
+-. /lib/functions.sh
+-
+-[ "$(board_name)" = "iptime,a2004mu" ] || exit 0
+-
+-uci set firewall.@defaults[0].flow_offloading='1'
+-uci set firewall.@defaults[0].flow_offloading_hw='1'
+-- 
+2.53.0
+

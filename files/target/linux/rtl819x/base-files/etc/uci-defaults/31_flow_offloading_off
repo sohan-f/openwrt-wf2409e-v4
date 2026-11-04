@@ -1,0 +1,8 @@
+#!/bin/sh
+# Netis WF2409E v4: guarantee flow offload is OFF. The donor's A2004MU
+# uci-defaults (05_enable_flow_offloading) is deleted by patch 0005 in our
+# tree, and this is belt-and-braces so an accidental reintroduction can't
+# silently break mandatory SQM shaping.
+uci -q set firewall.@defaults[0].flow_offloading='0'
+uci -q set firewall.@defaults[0].flow_offloading_hw='0'
+uci -q commit firewall

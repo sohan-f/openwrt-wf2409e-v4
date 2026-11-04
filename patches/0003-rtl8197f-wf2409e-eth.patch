@@ -1,0 +1,174 @@
+From 66a0aa11e2485ccdab80e39ca6121b6a2f8c334a Mon Sep 17 00:00:00 2001
+From: wb <wb@local>
+Date: Wed, 4 Nov 2026 12:47:15 +0000
+Subject: [PATCH] wf2409e-eth
+
+Signed-off-by: Sohan Ali <96324905+sohan-f@users.noreply.github.com>
+---
+ target/linux/rtl819x/dts/rtl8197f-a2004mu.dts |  6 ++
+ .../net/ethernet/realtek/rtl8197f_eth.c       | 97 ++++++++++++++++---
+ 2 files changed, 89 insertions(+), 14 deletions(-)
+
+diff --git a/target/linux/rtl819x/dts/rtl8197f-a2004mu.dts b/target/linux/rtl819x/dts/rtl8197f-a2004mu.dts
+index ca8414a..084bf53 100644
+--- a/target/linux/rtl819x/dts/rtl8197f-a2004mu.dts
++++ b/target/linux/rtl819x/dts/rtl8197f-a2004mu.dts
+@@ -160,6 +160,12 @@
+ &eth0 {
+ 	nvmem-cells = <&macaddr_hwsetting>;
+ 	nvmem-cell-names = "mac-address";
++	/*
++	 * Marks eth0 as a DSA conduit for the onboard RTL8367RB (the
++	 * eth0 driver gates applyA/applyFwd and the RTL8_4 RX-tag
++	 * behaviour on this property; internal-switch boards omit it).
++	 */
++	realtek,dsa-conduit;
+ };
+ 
+ &wifi2g {
+diff --git a/target/linux/rtl819x/files/drivers/net/ethernet/realtek/rtl8197f_eth.c b/target/linux/rtl819x/files/drivers/net/ethernet/realtek/rtl8197f_eth.c
+index bda3d87..8db691d 100644
+--- a/target/linux/rtl819x/files/drivers/net/ethernet/realtek/rtl8197f_eth.c
++++ b/target/linux/rtl819x/files/drivers/net/ethernet/realtek/rtl8197f_eth.c
+@@ -330,6 +330,11 @@ struct rtl_eth {
+ 	struct timer_list poll_timer;
+ 	int irq;		/* swcore IRQ, or <0 when running polled */
+ 	bool irq_mode;		/* true once the IRQ is claimed and unmasked */
++	/* true when eth0 is a DSA conduit (external switch): keep the donor
++	 * applyA/applyFwd + RTL8_4 RX-tag behaviour. Boards without the
++	 * property (WF2409E: internal switch, no DSA) program the fabric's
++	 * VLAN tables directly via wf2409e_vlan_setup() instead. */
++	bool dsa_conduit;
+ 
+ 	struct rtl_desc *rx_ring[NUM_RX_RING];
+ 	dma_addr_t rx_ring_dma[NUM_RX_RING];
+@@ -582,18 +587,20 @@ static int rtl_rx_poll(struct napi_struct *napi, int budget)
+ 					 * in opts4.SPA. Recreate the standard RTL8_4 RX
+ 					 * tag expected by the DSA core.
+ 					 */
+-					skb_push(skb, RTL8_4_TAG_LEN);
+-					memmove(skb->data, skb->data + RTL8_4_TAG_LEN,
+-						2 * ETH_ALEN);
+-					skb->data[12] = RTL8_4_ETHERTYPE >> 8;
+-					skb->data[13] = RTL8_4_ETHERTYPE & 0xff;
+-					skb->data[14] = RTL8_4_PROTOCOL;
+-					skb->data[15] = 0;
+-					skb->data[16] = 0;
+-					skb->data[17] = 0;
+-					skb->data[18] = 0;
+-					skb->data[19] = p->rx_last_spa;
+-					len += RTL8_4_TAG_LEN;
++					if (p->dsa_conduit) {
++						skb_push(skb, RTL8_4_TAG_LEN);
++						memmove(skb->data, skb->data + RTL8_4_TAG_LEN,
++							2 * ETH_ALEN);
++						skb->data[12] = RTL8_4_ETHERTYPE >> 8;
++						skb->data[13] = RTL8_4_ETHERTYPE & 0xff;
++						skb->data[14] = RTL8_4_PROTOCOL;
++						skb->data[15] = 0;
++						skb->data[16] = 0;
++						skb->data[17] = 0;
++						skb->data[18] = 0;
++						skb->data[19] = p->rx_last_spa;
++						len += RTL8_4_TAG_LEN;
++					}
+ 					skb->protocol = eth_type_trans(skb, p->ndev);
+ 					if ((p->ndev->features & NETIF_F_RXCSUM) &&
+ 					    (((opts4 & RD_IPV4) &&
+@@ -1152,6 +1159,7 @@ early_initcall(rtl_early_regdump);
+ 
+ static void rtl_apply_a(struct rtl_eth *p);
+ static void rtl_apply_fwd(struct rtl_eth *p);
++static void wf2409e_vlan_setup(struct rtl_eth *p);
+ static int rtl_hwnat_prepare(struct rtl_eth *p);
+ static void rtl_hwnat_off(struct rtl_eth *p);
+ static int rtl_hwnat_replace(struct rtl_eth *p, unsigned long cookie,
+@@ -1181,8 +1189,12 @@ static int rtl_open(struct net_device *ndev)
+ 	       p->sysreg + CLK_MANAGE);
+ 	mdelay(10);
+ 
+-	rtl_apply_a(p);
+-	rtl_apply_fwd(p);
++	if (p->dsa_conduit) {
++		rtl_apply_a(p);
++		rtl_apply_fwd(p);
++	} else {
++		wf2409e_vlan_setup(p);
++	}
+ 
+ 	netdev_info(ndev, "up: CVIDR=0x%08x FWD=0x%08x MSC=0x%08x\n",
+ 		    readl(p->swcore + SW_CVIDR),
+@@ -3064,6 +3076,61 @@ static ssize_t applyFwd_store(struct device *dev, struct device_attribute *attr,
+ }
+ static DEVICE_ATTR_WO(applyFwd);
+ 
++/*
++ * WF2409E v4: the five jacks are ports 0-4 of the internal RTL865x fabric
++ * (port 4 = WAN), the CPU extension is bit 8 (EXT2). Program VLAN 1 = WAN
++ * and VLAN 2 = LAN with the CPU egressing tagged; eth0 then carries
++ * 802.1Q-tagged frames that the fabric resolves by VID, so no DSA is
++ * involved (nor is the bootloader's factory VLAN state relied upon).
++ *
++ * Table entry format is the donor-verified one: word0 = member bits [0:8] |
++ * untagged-egress bits [9:17] (applyFwd readback-proven on RTL8197F HW:
++ * VLAN1 w0=0x00020301 member=BIT0|BIT8 egressUntag=(BIT0|BIT8)<<9).
++ */
++static void wf2409e_vlan_setup(struct rtl_eth *p)
++{
++	void __iomem *sw = p->swcore;
++	u32 wan[8] = { 0x00002110 };	/* member {4,CPU}, untag {4} */
++	u32 lan[8] = { 0x00001f0f };	/* member {0..3,CPU}, untag {0..3} */
++	u32 swtcr0;
++	int err;
++
++	/* Per-port PVIDs: LAN jacks 0-3 -> VID 2, WAN jack 4 -> VID 1, CPU -> 2
++	 * (12-bit VID field, even port bits [11:0], odd port bits [23:12], as
++	 * in rtl_hwnat_base_start's PVCR programming). */
++	writel((readl(sw + SW_PORT_VLAN_CONTROL_0) & ~0x0fff0fffu) |
++	       2u | (2u << 16), sw + SW_PORT_VLAN_CONTROL_0);
++	writel((readl(sw + SW_PORT_VLAN_CONTROL_0 + 4) & ~0x0fff0fffu) |
++	       2u | (2u << 16), sw + SW_PORT_VLAN_CONTROL_0 + 4);
++	writel((readl(sw + SW_PORT_VLAN_CONTROL_0 + 8) & ~0x0fffu) |
++	       1u, sw + SW_PORT_VLAN_CONTROL_0 + 8);
++	writel((readl(sw + SW_PORT_VLAN_CONTROL_0 + 16) & ~0x0fffu) |
++	       2u, sw + SW_PORT_VLAN_CONTROL_0 + 16);
++
++	mutex_lock(&p->tbl_lock);
++	err = rtl_tlu_stop(sw, &swtcr0);
++	if (!err) {
++		err = rtl_tbl_wr(sw, RTL_TBL_ADDR(RTL_TBL_VLAN, 1), wan, 8);
++		if (!err)
++			err = rtl_tbl_wr(sw, RTL_TBL_ADDR(RTL_TBL_VLAN, 2), lan, 8);
++		rtl_tlu_start(sw, swtcr0);
++	}
++	mutex_unlock(&p->tbl_lock);
++	if (err) {
++		dev_err(p->dev, "wf2409e VLAN table access failed: %d\n", err);
++		return;
++	}
++
++	/* Same ingress posture applyFwd validated on hardware: no per-port
++	 * VLAN ingress filtering, and multicast/broadcast reaches the CPU. */
++	writel(0, sw + SW_VLAN_CONTROL_0);
++	writel(readl(sw + SW_FRAME_FWD_CFG) | SW_MULTICAST_TO_CPU,
++	       sw + SW_FRAME_FWD_CFG);
++
++	netdev_info(p->ndev, "wf2409e VLANs: WAN vid1 w0=0x%08x LAN vid2 w0=0x%08x PVIDs 2/2/2/2/1 CPU2\n",
++		    wan[0], lan[0]);
++}
++
+ static int rtl_hwnat_prepare(struct rtl_eth *p)
+ {
+ 	static const u32 vlan[2][8] = {
+@@ -3322,6 +3389,8 @@ static int rtl_eth_probe(struct platform_device *pdev)
+ 	p = netdev_priv(ndev);
+ 	p->ndev = ndev;
+ 	p->dev = &pdev->dev;
++	p->dsa_conduit = of_property_read_bool(pdev->dev.of_node,
++					       "realtek,dsa-conduit");
+ 	/* the zeroed priv would read as IRQ 0; stay polled until one is claimed */
+ 	p->irq = -1;
+ 	spin_lock_init(&p->tx_lock);
+-- 
+2.53.0
+

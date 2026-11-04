@@ -1,0 +1,39 @@
+#!/bin/sh
+# Netis WF2409E v4: seed the onboard 2.4 GHz RTL8192CD radio on first boot.
+#
+# The rtl8192cd cfg80211 driver registers its wiphy and netifd's wireless
+# layer understands it. The driver has no DT/efuse MAC path for the radio,
+# so the per-unit WLAN MAC (stock base MAC + 2) must be set from the netis
+# data block here; eth0/eth0.x take the base MAC and base + 1 instead
+# (see 02_network).
+
+[ -e /etc/config/wireless ] || touch /etc/config/wireless
+uci -q batch <<EOF
+set wireless.radio0='wifi-device'
+set wireless.radio0.type='mac80211'
+set wireless.radio0.hwmode='11g'
+set wireless.radio0.channel='6'
+set wireless.radio0.htmode='HT20'
+set wireless.radio0.disabled='0'
+set wireless.default_radio0='wifi-iface'
+set wireless.default_radio0.device='radio0'
+set wireless.default_radio0.network='lan'
+set wireless.default_radio0.mode='ap'
+set wireless.default_radio0.ssid='OpenWrt-WF2409E'
+set wireless.default_radio0.encryption='psk2'
+set wireless.default_radio0.key='openwrt'
+commit wireless
+EOF
+
+. /lib/functions/system.sh
+
+# Per-unit radio MAC: stock base from the netis block at offset 0x3d
+# (the only true per-unit datum in that block), WLAN MAC = base + 2.
+if wlan_mac=$(mtd_get_mac_binary netis 0x3d); then
+	case "$wlan_mac" in
+	[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F])
+		uci -q set wireless.radio0.macaddress="$(macaddr_add "$wlan_mac" 2)"
+		uci -q commit wireless
+		;;
+	esac
+fi

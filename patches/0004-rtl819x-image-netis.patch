@@ -1,0 +1,138 @@
+From 3e54084cdae1a03c00586ee166896796c721a0e4 Mon Sep 17 00:00:00 2001
+From: wb <wb@local>
+Date: Wed, 4 Nov 2026 12:53:05 +0000
+Subject: [PATCH] wf2409e-image
+
+Signed-off-by: Sohan Ali <96324905+sohan-f@users.noreply.github.com>
+---
+ target/linux/rtl819x/image/Makefile      | 36 +++++++++++++
+ target/linux/rtl819x/image/netis-cs6c.py | 65 ++++++++++++++++++++++++
+ 2 files changed, 101 insertions(+)
+ create mode 100644 target/linux/rtl819x/image/netis-cs6c.py
+
+diff --git a/target/linux/rtl819x/image/Makefile b/target/linux/rtl819x/image/Makefile
+index c0d1fd7..6e3848a 100644
+--- a/target/linux/rtl819x/image/Makefile
++++ b/target/linux/rtl819x/image/Makefile
+@@ -81,6 +81,15 @@ define Build/a2004m-sysupgrade
+ 	mv "$@.new" "$@"
+ endef
+ 
++# Netis proprietary kernel-image header: see netis-cs6c.py for the exact
++# format and the checksum contract the stock bootloader enforces.
++define Build/netis-cs6c
++	python3 ./netis-cs6c.py \
++		--input "$@" \
++		--output "$@.new"
++	mv "$@.new" "$@"
++endef
++
+ define Device/Default
+   PROFILES := Default
+   KERNEL_DEPENDS = $$(wildcard $$(DTS_DIR)/$$(DEVICE_DTS).dts)
+@@ -103,4 +112,31 @@ define Device/iptime_a2004mu
+ endef
+ TARGET_DEVICES += iptime_a2004mu
+ 
++# Netis WF2409E v4: 8 MiB flash with the stock layout intact. The kernel
++# slot is 0x2d0000 (0x30000..0x300000), the rootfs slot 0x4f8000
++# (0x300000..0x7f8000); the loader caps the whole image at 0x78c000.
++# The bootloader 0x0..0x20000, config 0x20000..0x30000, netis 0x7f8000..
++# 0x7fc000 and reserved 0x7fc000..0x800000 regions are outside both images.
++# Netis flashers burn the factory image at the cs6c burn address 0x30000.
++define Device/netis_wf2409e_v4
++  DEVICE_VENDOR := Netis
++  DEVICE_MODEL := WF2409E
++  DEVICE_VARIANT := v4
++  DEVICE_DTS := rtl8197f-wf2409ev4
++  SUPPORTED_DEVICES := netis,wf2409e-v4
++  BLOCKSIZE := 64k
++  KERNEL_SIZE := 2880k
++  IMAGE_SIZE := 7728k
++  KERNEL := kernel-bin | append-dtb | lzma | loader-kernel | netis-cs6c
++  KERNEL_INITRAMFS := kernel-bin | append-dtb | lzma | loader-kernel | netis-cs6c
++  DEVICE_PACKAGES := dnsmasq kmod-rtl8192cd
++  IMAGES := factory.bin sysupgrade.bin
++  IMAGE/sysupgrade.bin := append-kernel | check-size $$(KERNEL_SIZE) | \
++	pad-to $$(KERNEL_SIZE) | append-rootfs | pad-rootfs | check-size | \
++	append-metadata
++  IMAGE/factory.bin := append-kernel | check-size $$(KERNEL_SIZE) | \
++	pad-to $$(KERNEL_SIZE) | append-rootfs | pad-rootfs | check-size
++endef
++TARGET_DEVICES += netis_wf2409e_v4
++
+ $(eval $(call BuildImage))
+diff --git a/target/linux/rtl819x/image/netis-cs6c.py b/target/linux/rtl819x/image/netis-cs6c.py
+new file mode 100644
+index 0000000..6473b91
+--- /dev/null
++++ b/target/linux/rtl819x/image/netis-cs6c.py
+@@ -0,0 +1,65 @@
++#!/usr/bin/env python3
++"""Wrap a loader-kernel payload in the Netis proprietary cs6c image header.
++
++The stock bootloader expects a kernel image headed by 16 bytes -- the
++four-byte signature (cs6c or cr6c), the RAM start address, the flash burn
++address and a length, all big-endian u32 -- followed by exactly `len`
++payload bytes which it copies to the start address and jumps to. It
++validates a big-endian 16-bit running sum over those `len` bytes; the sum
++must be 0. This tool therefore appends a two-byte checker word chosen so
++that the sum closes to zero (the stock cr6c kernel does the same: its
++len=0x209002 counts the 2-byte checker, so len is always payload+2).
++
++An odd payload is zero-extended before checking. The trailing bytes sit
++after the LZMA stream the loader stub decompresses, so they are ignored
++by the boot path; they only exist to keep the summed window even and
++pairable.
++
++cs6c (unlike cr6c) skips the vendor rootfs-trailer validation, which is
++what lets OpenWrt replace the squashfs part of the image.
++
++usage: netis-cs6c.py --in loader-kernel.bin --out factory-kernel.bin
++"""
++
++import argparse
++import struct
++import sys
++
++
++def be16_sum(data):
++    if len(data) & 1:
++        data += b"\x00"
++    total = 0
++    for (word,) in struct.iter_unpack(">H", data):
++        total = (total + word) & 0xFFFF
++    return total
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--input")
++    ap.add_argument("--output")
++    ap.add_argument("--start", default=0x80A00000, type=lambda s: int(s, 0))
++    ap.add_argument("--burn", default=0x30000, type=lambda s: int(s, 0))
++    ap.add_argument("--sig", default="cs6c")
++    args = ap.parse_args()
++
++    payload = open(args.input, "rb").read()
++    if len(payload) % 2:
++        payload += b"\x00"
++
++    checker = (-be16_sum(payload)) & 0xFFFF
++    length = len(payload) + 2
++    header = struct.pack(">4sIII", args.sig.encode(), args.start, args.burn,
++                         length)
++    open(args.output, "wb").write(header + payload + struct.pack(">H", checker))
++
++    sys.stderr.write(
++        f"netis-cs6c: {args.input} -> {args.output} "
++        f"sig={args.sig} start={args.start:#x} burn={args.burn:#x} "
++        f"len={length:#x} payload={len(payload):#x}\n")
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+-- 
+2.53.0
+
