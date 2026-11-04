@@ -1,0 +1,72 @@
+From 6c7c4b7356889ccaf8c7f3ad62b2108db5de07c1 Mon Sep 17 00:00:00 2001
+From: wb <wb@local>
+Date: Wed, 4 Nov 2026 15:40:11 +0000
+Subject: [PATCH] rtl819x kernel: bigendian select + dma cache exports
+
+Signed-off-by: Sohan Ali <96324905+sohan-f@users.noreply.github.com>
+---
+ ...ps-rtl819x-bigendian-and-dma-exports.patch | 52 +++++++++++++++++++
+ 1 file changed, 52 insertions(+)
+ create mode 100644 target/linux/rtl819x/patches-6.18/030-mips-rtl819x-bigendian-and-dma-exports.patch
+
+diff --git a/target/linux/rtl819x/patches-6.18/030-mips-rtl819x-bigendian-and-dma-exports.patch b/target/linux/rtl819x/patches-6.18/030-mips-rtl819x-bigendian-and-dma-exports.patch
+new file mode 100644
+index 0000000..d1df91c
+--- /dev/null
++++ b/target/linux/rtl819x/patches-6.18/030-mips-rtl819x-bigendian-and-dma-exports.patch
+@@ -0,0 +1,52 @@
++From: OpenWrt RTL819x bring-up <noreply@example.invalid>
++Subject: [PATCH] MIPS: rtl819x: honor big-endian target and export legacy
++ non-coherent DMA cache ops for out-of-tree drivers
++
++Two bring-up fixes for the RTL8197F-class platform:
++
++1. The MACH_REALTEK_RTL819X Kconfig block was added selecting only
++   SYS_SUPPORTS_LITTLE_ENDIAN. CONFIG_CPU_BIG_ENDIAN depends on
++   SYS_SUPPORTS_BIG_ENDIAN, so board fragments that request a big-endian
++   build were silently dropped at merge time and the kernel compiled
++   little-endian. The RTL8197F-class SoCs only run big-endian (the stock
++   vendor kernel is BE MIPS 24Kc), so select SYS_SUPPORTS_BIG_ENDIAN.
++
++2. The non-coherent-MIPS cache-op trio _dma_cache_wback_inv /
++   _dma_cache_wback / _dma_cache_inv is defined in arch/mips/mm/cache.c
++   (under CONFIG_DMA_NONCOHERENT, assigned by c-r4k.c) but is no longer
++   exported for modules, so GPL out-of-tree platform drivers that use the
++   vendor cache-maintenance API (rtl8192cd radio driver) fail at modpost
++   with "undefined" symbols. Export them exactly like the stock Realtek
++   SDK kernel did.
++
++---
++ arch/mips/Kconfig     | 2 +-
++ arch/mips/mm/cache.c  | 5 +++++
++ 2 files changed, 6 insertions(+), 1 deletion(-)
++
++--- a/arch/mips/Kconfig
+++++ b/arch/mips/Kconfig
++@@ -727,6 +727,6 @@ config MACH_REALTEK_RTL819X
++ 	select SYS_HAS_CPU_MIPS32_R2
++ 	select SYS_SUPPORTS_32BIT_KERNEL
++-	select SYS_SUPPORTS_LITTLE_ENDIAN
+++	select SYS_SUPPORTS_BIG_ENDIAN
++ 	select USE_OF
++ 	select SYS_HAS_EARLY_PRINTK
++ 	help
++--- a/arch/mips/mm/cache.c
+++++ b/arch/mips/mm/cache.c
++@@ -78,6 +78,11 @@
++ /* DMA cache operations. */
++ void (*_dma_cache_wback_inv)(unsigned long start, unsigned long size);
++ void (*_dma_cache_wback)(unsigned long start, unsigned long size);
++ void (*_dma_cache_inv)(unsigned long start, unsigned long size);
+++
+++/* Exported for GPL out-of-tree platform drivers (e.g. the Realtek
+++ * rtl8192cd radio driver) that perform manual cache maintenance on this
+++ * non-coherent MIPS SoC, like the stock vendor SDK kernel does. */
+++EXPORT_SYMBOL(_dma_cache_wback_inv);
+++EXPORT_SYMBOL(_dma_cache_wback);
+++EXPORT_SYMBOL(_dma_cache_inv);
++ 
++ #endif /* CONFIG_DMA_NONCOHERENT */
+-- 
+2.53.0
+
