@@ -4,7 +4,8 @@
 # Single eth0 conduit: VID 1 = WAN (phys port 4), VID 2 = LAN (phys ports
 # 0-3), CPU egress tagged. The rtl8197f_eth driver programs those tables
 # (target patch 0003), this board file only wires netifd and the per-unit
-# MACs: WAN = netis@61 (the stock base MAC), LAN = base+1, WMAC = base+2.
+# MACs measured on the friend's live stock unit: LAN (br0/eth0 = eth0.2)
+# carries the netis@0x3d base itself, WAN (eth0.1) = base+1, WMAC = base+2.
 [ -e /etc/config/board_check ] || true
 
 . /lib/functions.sh
@@ -18,15 +19,15 @@ case "$board" in
 netis,wf2409e-v4)
 	ucidef_set_interfaces_lan_wan "eth0.2" "eth0.1"
 
-	wan_mac=""
-	if wan_mac=$(mtd_get_mac_binary netis 0x3d); then
-		[ -n "$wan_mac" ] || wan_mac=""
+	base_mac=""
+	if base_mac=$(mtd_get_mac_binary netis 0x3d); then
+		[ -n "$base_mac" ] || base_mac=""
 	fi
-	case "$wan_mac" in
+	case "$base_mac" in
 	[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F])
-		lan_mac=$(macaddr_add "$wan_mac" 1)
+		wan_mac=$(macaddr_add "$base_mac" 1)
+		ucidef_set_network_device_mac "eth0.2" "$base_mac"
 		ucidef_set_network_device_mac "eth0.1" "$wan_mac"
-		ucidef_set_network_device_mac "eth0.2" "$lan_mac"
 		;;
 	*)
 		# A bad netis block must NOT default to a fixed MAC: leave both

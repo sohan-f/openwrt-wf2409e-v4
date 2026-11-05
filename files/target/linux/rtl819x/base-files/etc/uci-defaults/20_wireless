@@ -4,8 +4,8 @@
 # The rtl8192cd cfg80211 driver registers its wiphy and netifd's wireless
 # layer understands it. The driver has no DT/efuse MAC path for the radio,
 # so the per-unit WLAN MAC (stock base MAC + 2) must be set from the netis
-# data block here; eth0/eth0.x take the base MAC and base + 1 instead
-# (see 02_network).
+# data block here; the eth0.x devices carry the eth MACs instead: LAN
+# (eth0.2) = base, WAN (eth0.1) = base + 1 (see 02_network).
 
 [ -e /etc/config/wireless ] || touch /etc/config/wireless
 uci -q batch <<EOF
@@ -27,8 +27,8 @@ EOF
 
 . /lib/functions/system.sh
 
-# Per-unit radio MAC: stock base from the netis block at offset 0x3d
-# (the only true per-unit datum in that block), WLAN MAC = base + 2.
+# Per-unit radio MAC: stock base from the netis block at offset 0x3d,
+# WLAN MAC = base + 2 (WAN is base + 1 on this board; see 02_network).
 if wlan_mac=$(mtd_get_mac_binary netis 0x3d); then
 	case "$wlan_mac" in
 	[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F])

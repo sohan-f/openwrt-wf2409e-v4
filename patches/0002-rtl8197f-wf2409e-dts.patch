@@ -1,26 +1,31 @@
 From 0672289559ea4432618531fc94b8ea51e4bf2fc2 Mon Sep 17 00:00:00 2001
 From: wb <wb@local>
-Date: Wed, 4 Nov 2026 12:44:30 +0000
+Date: Thu, 5 Nov 2026 00:00:00 +0000
 Subject: [PATCH] wf2409e-dts
+
+Front-panel GPIO map for the WF2409E v4 board: PEFGH gpio bank (E1/E3
+lamps), gpio-leds and polled-button nodes pinned to the stock firmware
+pin roles (15 = wps/reset lamp act.low, 17 = wps button, 19 = reset
+button, 33 = activity lamp act.low, 35 = power lamp).
 
 Signed-off-by: Sohan Ali <96324905+sohan-f@users.noreply.github.com>
 ---
- .../linux/rtl819x/dts/rtl8197f-wf2409ev4.dts  | 120 ++++++++++++++++++
- 1 file changed, 120 insertions(+)
- create mode 100644 target/linux/rtl819x/dts/rtl8197f-wf2409ev4.dts
+ .../linux/rtl819x/dts/rtl8197f-wf2409ev4.dts  | 196 ++++++++++++++++++++++-
+ 1 file changed, 196 insertions(+)
 
 diff --git a/target/linux/rtl819x/dts/rtl8197f-wf2409ev4.dts b/target/linux/rtl819x/dts/rtl8197f-wf2409ev4.dts
 new file mode 100644
-index 0000000..a9967b9
+index 0000000..181a9c5
 --- /dev/null
 +++ b/target/linux/rtl819x/dts/rtl8197f-wf2409ev4.dts
-@@ -0,0 +1,120 @@
+@@ -0,0 +1,196 @@
 +// SPDX-License-Identifier: GPL-2.0-only OR MIT
 +
 +/dts-v1/;
 +
 +#include "rtl8197f.dtsi"
 +#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/input/linux-event-codes.h>
 +
 +/ {
 +	model = "Netis WF2409E v4";
@@ -33,9 +38,9 @@ index 0000000..a9967b9
 +
 +	/*
 +	 * SoC GPIO, ports A-D bank (PABCD) of the RTL8197F GPIO block at
-+	 * 0x18003500. Same generic mapping the A2004MU uses; LED/button
-+	 * wiring is not yet verified for this board, so no board-specific
-+	 * consumers are declared yet.
++	 * 0x18003500, same generic mmio mapping the donor A2004MU port uses
++	 * (it bit-bangs switch SMI over gpio 18/19 there, so GPIO-mode is the
++	 * reset-default pin function on this SoC family).
 +	 */
 +	gpio: gpio@1800350c {
 +		compatible = "brcm,bcm6345-gpio";
@@ -44,6 +49,81 @@ index 0000000..a9967b9
 +		gpio-controller;
 +		#gpio-cells = <2>;
 +		ngpios = <32>;
++	};
++
++	/*
++	 * Ports E-H bank (PEFGH) at 0x1800351c: needed for the board's
++	 * activity (gpio 33, E1) and power (gpio 35, E3) lamps.
++	 */
++	gpio1: gpio@18003524 {
++		compatible = "brcm,bcm6345-gpio";
++		reg = <0x18003528 0x4>, <0x18003524 0x4>;
++		reg-names = "dat", "dirout";
++		gpio-controller;
++		#gpio-cells = <2>;
++		ngpios = <32>;
++		/*
++		 * gpio-mmio auto-assigns the lowest free base; pinning the
++		 * second bank to 32 keeps 33/35 addressable as gpio1:1/3 no
++		 * matter the probe order.
++		 */
++		gpio-mmio,base = <32>;
++	};
++
++	/*
++	 * Front-panel wiring, verified against the stock firmware itself
++	 * (live sysfs exports {15,17,19,33,35}, write-behavior experiments
++	 * on the friend's unit, and the MSDK BSP defaults C1/C3 = wps/reset
++	 * btn, B7 = wps/reset led):
++	 *   gpio 15 (B7): WPS+RESET lamp, active-LOW (stock idles it low =
++	 *                 lit; writing 1 dimmed it for the user)
++	 *   gpio 33 (E1): activity/internet lamp, active-LOW (stock idles it
++	 *                 low = lit, pulses high ~1 s under traffic)
++	 *   gpio 35 (E3): power lamp, active-HIGH (stock leaves it high)
++	 *   gpio 17 (C1): WPS button, active-LOW (stock input-locks the pin)
++	 *   gpio 19 (C3): RESET button, active-LOW (stock input-locks the pin)
++	 * LAN/WAN port lamps are driven by the switch-core LED engine, not
++	 * by these GPIOs.
++	 */
++	leds {
++		compatible = "gpio-leds";
++
++		led-wps {
++			label = "wf2409e:green:wps";
++			gpios = <&gpio 15 GPIO_ACTIVE_LOW>;
++			default-state = "on";
++		};
++
++		led-power {
++			label = "wf2409e:green:power";
++			gpios = <&gpio1 3 GPIO_ACTIVE_HIGH>;
++			default-state = "on";
++		};
++
++		led-activity {
++			label = "wf2409e:green:activity";
++			gpios = <&gpio1 1 GPIO_ACTIVE_LOW>;
++			default-state = "on";
++		};
++	};
++
++	keys {
++		compatible = "gpio-keys-polled";
++		poll-interval = <100>;
++
++		button-reset {
++			label = "reset";
++			linux,code = <KEY_RESTART>;
++			gpios = <&gpio 19 GPIO_ACTIVE_LOW>;
++			debounce-interval = <3>;
++		};
++
++		button-wps {
++			label = "wps";
++			linux,code = <KEY_WPS_BUTTON>;
++			gpios = <&gpio 17 GPIO_ACTIVE_LOW>;
++			debounce-interval = <3>;
++		};
 +	};
 +};
 +
@@ -135,6 +215,3 @@ index 0000000..a9967b9
 +	 */
 +	status = "disabled";
 +};
--- 
-2.53.0
-

@@ -1,0 +1,29 @@
+From 0672289559ea4432618531fc94b8ea51e4bf2fc2 Mon Sep 17 00:00:00 2001
+From: wb <wb@local>
+Date: Thu, 5 Nov 2026 00:00:00 +0000
+Subject: [PATCH] rtl8197f-board-gpio
+
+Front-panel driver hooks for the WF2409E board dts: gpio-leds (lamps on
+gpio 15/33/35) and gpio-keys-polled (reset/wps on 19/17), plus their
+explicit config-fragment lines so the merge cannot silently drop them.
+
+Signed-off-by: Sohan Ali <96324905+sohan-f@users.noreply.github.com>
+---
+ target/linux/rtl819x/rtl8197f/config-6.18 | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/target/linux/rtl819x/rtl8197f/config-6.18 b/target/linux/rtl819x/rtl8197f/config-6.18
+index b396ddf..a976dc0 100644
+--- a/target/linux/rtl819x/rtl8197f/config-6.18
++++ b/target/linux/rtl819x/rtl8197f/config-6.18
+@@ -85,3 +85,10 @@ CONFIG_PCIE_RTL8197F=y
+ CONFIG_GENERIC_PCI_IOMAP=y
+ CONFIG_PCI_DOMAINS=y
+ # CONFIG_KALLSYMS_UNCOMPRESSED is not set
++
++# Board dts front panel: gpio-leds lamps + polled GPIO buttons (wf2409e).
++CONFIG_INPUT=y
++CONFIG_INPUT_KEYBOARD=y
++CONFIG_KEYBOARD_GPIO_POLLED=y
++CONFIG_LEDS_CLASS=y
++CONFIG_LEDS_GPIO=y
