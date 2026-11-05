@@ -75,14 +75,8 @@ restore_cache() {
 	fi
 }
 
-save_cache() {
-	local rc=$?
-	set +e
-	echo "== save caches to $CACHE_DIR"
-	# rsync creates the leaf but not missing parents; every path below is
-	# nested one level deeper than $CACHE_DIR.
-	mkdir -p "$CACHE_DIR" "$CACHE_DIR/build_dir" "$CACHE_DIR/dl" \
-		"$CACHE_DIR/ccache" "$CACHE_DIR/artifacts"
+save_toolchain() {
+	mkdir -p "$CACHE_DIR/build_dir"
 	if [ -d "$TREE/staging_dir" ]; then
 		rsync -a --delete "$TREE/staging_dir/" "$CACHE_DIR/staging_dir/"
 	fi
@@ -94,6 +88,17 @@ save_cache() {
 		[ -d "$d" ] || continue
 		rsync -a --delete "$d/" "$CACHE_DIR/build_dir/$(basename "$d")/"
 	done
+}
+
+save_cache() {
+	local rc=$?
+	set +e
+	echo "== save caches to $CACHE_DIR"
+	# rsync creates the leaf but not missing parents; every path below is
+	# nested one level deeper than $CACHE_DIR.
+	mkdir -p "$CACHE_DIR" "$CACHE_DIR/build_dir" "$CACHE_DIR/dl" \
+		"$CACHE_DIR/ccache" "$CACHE_DIR/artifacts"
+	save_toolchain
 	if [ -d "$TREE/dl" ]; then
 		rsync -a "$TREE/dl/" "$CACHE_DIR/dl/"
 	fi
@@ -135,11 +140,28 @@ if [ -d "$TREE/.git" ]; then
 	git -C "$TREE" clean -fdq
 fi
 
+# A stopped/deleted codespace kills the build without running the EXIT trap,
+# so persist the toolchain the moment build.sh marks it installed instead of
+# waiting for the run to end. The final save_cache overwrites this copy.
+run_build() {
+	FORCE_UNSAFE_CONFIGURE=1 CCACHE_MAXSIZE="$CCACHE_MAXSIZE" JOBS="$JOBS" \
+		BUILD_DIR="$BUILD_DIR" "$REPO_ROOT/build.sh" &
+	local pid=$! saved=
+	while kill -0 "$pid" 2>/dev/null; do
+		if [ -z "$saved" ] && [ -f "$TREE/staging_dir/.wf2409e-toolchain-ready" ]; then
+			echo "== toolchain installed; persisting it now"
+			save_toolchain
+			saved=1
+		fi
+		sleep 20
+	done
+	wait "$pid"
+}
+
 # Most package rules are serial internally and many steps are one package at
 # a time, so one job per core leaves cores idle; oversubscribe by 2x, which
 # 16 GB comfortably absorbs.
 JOBS="${JOBS:-$(( $(nproc) * 2 ))}"
 echo "== workspace: tree=$BUILD_DIR cache=$CACHE_DIR jobs=$JOBS"
 mkdir -p "$BUILD_DIR"
-FORCE_UNSAFE_CONFIGURE=1 CCACHE_MAXSIZE="$CCACHE_MAXSIZE" JOBS="$JOBS" \
-	BUILD_DIR="$BUILD_DIR" "$REPO_ROOT/build.sh"
+run_build
