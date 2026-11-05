@@ -59,13 +59,14 @@ jobs:
       # Cache both so make toolchain/install can be a true no-op on a hit.
       # Strict key, no restore-keys: inputs must match exactly.
       #
-      # Key lists toolchain-determining inputs ONLY: the tree pin inside
-      # build.sh and the 0001 endian patch (ARCH, config-6.18). Patches
-      # 0002..0005 touch DTS / board metadata / image recipes and cannot
-      # affect the toolchain or kernel headers — listing them (or seed.config
-      # package selections) would invalidate the cache on every bring-up fix.
-      # EXTEND THIS LIST if a patch ever starts touching kernel include/uapi
-      # or anything the toolchain consumes.
+      # Key lists toolchain-determining inputs ONLY: the pins inside
+      # build.sh. After the endian revert the chain (0002..0010) touches
+      # DTS / board metadata / image recipes / kernel C files and cannot
+      # affect the cross-toolchain or kernel headers — listing them (or
+      # seed.config package selections) would invalidate the cache on
+      # every bring-up fix.
+      # EXTEND THIS LIST if anything starts affecting the cross-compiler
+      # (target.mk ARCH, kernel include/uapi edits, toolchain recipes).
       - name: Restore host tools and cross-toolchain
         id: toolchain-cache
         uses: actions/cache/restore@v5
@@ -74,7 +75,7 @@ jobs:
             build/openwrt/staging_dir
             build/openwrt/build_dir/host
             build/openwrt/build_dir/toolchain-*
-          key: wf2409e-v4-toolchain-${{ hashFiles('build.sh', 'patches/0001-*.patch') }}
+          key: wf2409e-v4-toolchain-${{ hashFiles('build.sh') }}
 
       # Compiler results are content-addressed by ccache, so a broad restore
       # prefix is safe across source/config changes. A new run key lets the
