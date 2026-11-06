@@ -1,0 +1,141 @@
+From 1b1f00000000deadbeef0000000000000000013 Mon Sep 17 00:00:00 2001
+From: wb <wb@local>
+Date: Fri, 6 Nov 2026 00:00:00 +0000
+Subject: [PATCH] blping-trace
+
+LED-trace milestones (blping_code) at eth probe, wifi module init
+chain, and the open/hw-bringup path: the no-UART probe for the
+silent-hang boot failure.
+
+Codes (busy-wait blink train on gpio33+gpio35, N dark pulses, one-shot):
+ 1 blping core online   6 init_one entered
+ 2 eth probe entered    7 pre cfg80211 iface add
+ 3 eth netdev reg'd     8 iface added, module OK
+ 4 module init entered  9 init_one FAILED
+ 5 register_driver      10 open entered
+ 11 pre init_hw_PCI    12 init_hw OK
+ 13 hw-init retry      14 open hw FAILED
+ 15 netif_start_queue
+
+--- a/package/kernel/rtl8192cd/src/8192cd_osdep.c
++++ b/package/kernel/rtl8192cd/src/8192cd_osdep.c
+@@ -9607,6 +9607,7 @@
+ 	DBFENTER;
+ 
+ 	priv = GET_DEV_PRIV(dev);
++	blping_code(10);
+ 
+     STADEBUG("===>\n");
+ 
+@@ -10415,8 +10416,10 @@
+ 		if(GET_CHIP_VER(priv) == VERSION_8192F)
+ 			hard_code_8192f_mibs(priv);
+ #endif
++		blping_code(11);
+ 		rc = rtl8192cd_init_hw_PCI(priv);
+ 		//delay_ms(200);		// TODO: need refinement, for 98 watchdog time out
++		if (rc == 0) blping_code(12);
+ 
+ #if defined(CONFIG_USB_HCI) || defined(CONFIG_SDIO_HCI)
+ 		if (GET_HCI_TYPE(priv) == RTL_HCI_USB || GET_HCI_TYPE(priv) == RTL_HCI_SDIO) {
+@@ -10459,6 +10462,7 @@
+ 		}
+ 
+ 		if (rc && ++init_hw_cnt < 5) {
++			blping_code(13);
+ #ifndef NOT_RTK_BSP
+ 		if (GET_CHIP_VER(priv)==VERSION_8192D) {
+ 			watchdog_kick();
+@@ -10480,6 +10484,7 @@
+ 		//SMP_UNLOCK(x);
+ 
+ 		if (rc) {
++			blping_code(14);
+ 			DEBUG_ERR("init hw failed!\n");
+ #ifdef CONFIG_RTL_92D_SUPPORT
+ 			if (GET_CHIP_VER(priv)==VERSION_8192D){
+@@ -11114,6 +11119,7 @@
+ 	//if (OPMODE & WIFI_AP_STATE)  //in case of station mode, queue will start only after assoc.
+ #if defined(CONFIG_PCI_HCI) || !defined(CONFIG_NETDEV_MULTI_TX_QUEUE)
+ 		if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
++			blping_code(15);
+ 			netif_start_queue(dev);		// start queue always
+ 		}
+ #endif
+@@ -14536,6 +14542,7 @@
+ 
+     priv = NULL;
+     regs = NULL;
++	blping_code(6);
+ 	pmib = NULL;
+ 	pevent_queue = NULL;
+ #ifdef RSSI_MONITOR_NCR
+@@ -16613,8 +16620,10 @@
+ 	if(vap_idx < 0) {
+ 		if (IS_ROOT_INTERFACE(priv)) //wrt-vxd
+ 		{
++			blping_code(7);
+ 			realtek_cfg80211_init(rtk,priv);
+ 			realtek_interface_add(priv, rtk, rtk->root_ifname, NL80211_IFTYPE_STATION, 0, 0);
++			blping_code(8);
+ 		}
+ #ifdef  UNIVERSAL_REPEATER //wrt-vxd
+ 		else
+@@ -18868,6 +18877,8 @@
+ {
+ 	int rc = 0;
+ 
++	blping_code(5);
++
+ 	_DEBUG_INFO("wlan_index:%d %d, %d, 0x%lx, 0x%lx, %d\n", index,
+ 			(((wlan_device[index].type >> TYPE_SHIFT) & TYPE_MASK) == TYPE_PCI_BIOS),
+ 			wlan_device[index].type, wlan_device[index].base_addr,wlan_device[index].conf_addr,
+@@ -18921,8 +18932,10 @@
+ 		//return rc;
+ #else // !(CONFIG_WLAN_HAL_8198F)
+ 		rc = rtl8192cd_init_one(NULL, NULL, &wlan_device[index], -1);
+-		if (rc)
++		if (rc) {
++			blping_code(9);
+ 			printk("init_one fail!!! rc=%d\n",rc);
++		}
+ 
+ #ifdef PRE_ALLOC_STA_BUF
+ 		// Only pre-allocate aid_obj (sta_info) on root interface
+@@ -18982,9 +18995,11 @@
+ int MDL_INIT __rtl8192cd_init(unsigned long base_addr)
+ {
+ 	int rc = -1;
++	extern void blping_code(int);
+ #ifdef MBSSID
+ 	int i;
+ #endif
++	blping_code(4);
+ 
+ #if defined(CONFIG_RTK_BOARDID)
+ 	if (!(BOARD_WIFI_TYPE(boot_board_id) & BOARD_WIFI_WIFI5)) {
+--- a/target/linux/rtl819x/files/drivers/net/ethernet/realtek/rtl8197f_eth.c
++++ b/target/linux/rtl819x/files/drivers/net/ethernet/realtek/rtl8197f_eth.c
+@@ -3374,11 +3374,13 @@
+ 
+ static int rtl_eth_probe(struct platform_device *pdev)
+ {
++	extern void blping_code(int);
+ 	struct net_device *ndev;
+ 	struct rtl_eth *p;
+ 	int ret;
+ 	unsigned int i;
+ 
++	blping_code(2);
+ 	ndev = devm_alloc_etherdev(&pdev->dev, sizeof(*p));
+ 	if (!ndev)
+ 		return -ENOMEM;
+@@ -3481,6 +3483,8 @@
+ 	if (ret)
+ 		return ret;
+ 
++	blping_code(3);
++
+ 	/* on-demand PHY status + interactive MDIO poke files */
+ 	device_create_file(&pdev->dev, &dev_attr_phy);
+ 	device_create_file(&pdev->dev, &dev_attr_mdio);
