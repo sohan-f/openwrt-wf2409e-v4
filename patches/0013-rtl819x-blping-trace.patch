@@ -19,7 +19,17 @@ Codes (busy-wait blink train on gpio33+gpio35, N dark pulses, one-shot):
 
 --- a/package/kernel/rtl8192cd/src/8192cd_osdep.c
 +++ b/package/kernel/rtl8192cd/src/8192cd_osdep.c
-@@ -9607,6 +9607,7 @@
+@@ -10,6 +10,9 @@
+ 
+ #define _8192CD_OSDEP_C_
+ 
++/* driver hooks (0013) call this; one file-scope decl covers every site */
++void blping_code(int);
++
+ #if CONFIG_OF /* DT support */
+ #include <linux/of.h>
+ #include <linux/of_device.h>
+@@ -9607,6 +9610,7 @@ int rtl8192cd_open(struct net_device *dev)
  	DBFENTER;
  
  	priv = GET_DEV_PRIV(dev);
@@ -27,7 +37,7 @@ Codes (busy-wait blink train on gpio33+gpio35, N dark pulses, one-shot):
  
      STADEBUG("===>\n");
  
-@@ -10415,8 +10416,10 @@
+@@ -10415,8 +10419,10 @@ do_hw_init:
  		if(GET_CHIP_VER(priv) == VERSION_8192F)
  			hard_code_8192f_mibs(priv);
  #endif
@@ -38,7 +48,7 @@ Codes (busy-wait blink train on gpio33+gpio35, N dark pulses, one-shot):
  
  #if defined(CONFIG_USB_HCI) || defined(CONFIG_SDIO_HCI)
  		if (GET_HCI_TYPE(priv) == RTL_HCI_USB || GET_HCI_TYPE(priv) == RTL_HCI_SDIO) {
-@@ -10459,6 +10462,7 @@
+@@ -10459,6 +10465,7 @@ do_hw_init:
  		}
  
  		if (rc && ++init_hw_cnt < 5) {
@@ -46,7 +56,7 @@ Codes (busy-wait blink train on gpio33+gpio35, N dark pulses, one-shot):
  #ifndef NOT_RTK_BSP
  		if (GET_CHIP_VER(priv)==VERSION_8192D) {
  			watchdog_kick();
-@@ -10480,6 +10484,7 @@
+@@ -10480,6 +10487,7 @@ do_hw_init:
  		//SMP_UNLOCK(x);
  
  		if (rc) {
@@ -54,7 +64,7 @@ Codes (busy-wait blink train on gpio33+gpio35, N dark pulses, one-shot):
  			DEBUG_ERR("init hw failed!\n");
  #ifdef CONFIG_RTL_92D_SUPPORT
  			if (GET_CHIP_VER(priv)==VERSION_8192D){
-@@ -11114,6 +11119,7 @@
+@@ -11114,6 +11122,7 @@ do_hw_init:
  	//if (OPMODE & WIFI_AP_STATE)  //in case of station mode, queue will start only after assoc.
  #if defined(CONFIG_PCI_HCI) || !defined(CONFIG_NETDEV_MULTI_TX_QUEUE)
  		if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
@@ -62,7 +72,7 @@ Codes (busy-wait blink train on gpio33+gpio35, N dark pulses, one-shot):
  			netif_start_queue(dev);		// start queue always
  		}
  #endif
-@@ -14536,6 +14542,7 @@
+@@ -14536,6 +14545,7 @@ void *rtl8192cd_init_one(struct sdio_func *psdio_func, void *ent, struct _device
  
      priv = NULL;
      regs = NULL;
@@ -70,7 +80,7 @@ Codes (busy-wait blink train on gpio33+gpio35, N dark pulses, one-shot):
  	pmib = NULL;
  	pevent_queue = NULL;
  #ifdef RSSI_MONITOR_NCR
-@@ -16613,8 +16620,10 @@
+@@ -16613,8 +16623,10 @@ register_driver:
  	if(vap_idx < 0) {
  		if (IS_ROOT_INTERFACE(priv)) //wrt-vxd
  		{
@@ -81,7 +91,7 @@ Codes (busy-wait blink train on gpio33+gpio35, N dark pulses, one-shot):
  		}
  #ifdef  UNIVERSAL_REPEATER //wrt-vxd
  		else
-@@ -18868,6 +18877,8 @@
+@@ -18868,6 +18880,8 @@ static int realtek_register_driver(int index)
  {
  	int rc = 0;
  
@@ -90,7 +100,7 @@ Codes (busy-wait blink train on gpio33+gpio35, N dark pulses, one-shot):
  	_DEBUG_INFO("wlan_index:%d %d, %d, 0x%lx, 0x%lx, %d\n", index,
  			(((wlan_device[index].type >> TYPE_SHIFT) & TYPE_MASK) == TYPE_PCI_BIOS),
  			wlan_device[index].type, wlan_device[index].base_addr,wlan_device[index].conf_addr,
-@@ -18921,8 +18932,10 @@
+@@ -18921,8 +18935,10 @@ static int realtek_register_driver(int index)
  		//return rc;
  #else // !(CONFIG_WLAN_HAL_8198F)
  		rc = rtl8192cd_init_one(NULL, NULL, &wlan_device[index], -1);
@@ -102,11 +112,7 @@ Codes (busy-wait blink train on gpio33+gpio35, N dark pulses, one-shot):
  
  #ifdef PRE_ALLOC_STA_BUF
  		// Only pre-allocate aid_obj (sta_info) on root interface
-@@ -18982,9 +18995,11 @@
- int MDL_INIT __rtl8192cd_init(unsigned long base_addr)
- {
- 	int rc = -1;
-+	extern void blping_code(int);
+@@ -18985,6 +19001,7 @@ int MDL_INIT __rtl8192cd_init(unsigned long base_addr)
  #ifdef MBSSID
  	int i;
  #endif
@@ -116,13 +122,17 @@ Codes (busy-wait blink train on gpio33+gpio35, N dark pulses, one-shot):
  	if (!(BOARD_WIFI_TYPE(boot_board_id) & BOARD_WIFI_WIFI5)) {
 --- a/target/linux/rtl819x/files/drivers/net/ethernet/realtek/rtl8197f_eth.c
 +++ b/target/linux/rtl819x/files/drivers/net/ethernet/realtek/rtl8197f_eth.c
-@@ -3374,11 +3374,13 @@
+@@ -30,6 +30,9 @@
+ #include <net/flow_offload.h>
+ #include <net/pkt_cls.h>
  
- static int rtl_eth_probe(struct platform_device *pdev)
- {
-+	extern void blping_code(int);
- 	struct net_device *ndev;
- 	struct rtl_eth *p;
++/* blping tracer hooks: declare once for the whole file */
++void blping_code(int);
++
+ /* CPU interface registers (offsets from the mapped base = phys 0x18010000). */
+ /* The swNic DMA engine wants descriptor-ring addresses in the uncached
+  * window: SDK writes (ring | UNCACHE_MASK) to CPURPDCR/CPUTPDCR. */
+@@ -3379,6 +3382,7 @@ static int rtl_eth_probe(struct platform_device *pdev)
  	int ret;
  	unsigned int i;
  
@@ -130,7 +140,7 @@ Codes (busy-wait blink train on gpio33+gpio35, N dark pulses, one-shot):
  	ndev = devm_alloc_etherdev(&pdev->dev, sizeof(*p));
  	if (!ndev)
  		return -ENOMEM;
-@@ -3481,6 +3483,8 @@
+@@ -3481,6 +3485,8 @@ static int rtl_eth_probe(struct platform_device *pdev)
  	if (ret)
  		return ret;
  
