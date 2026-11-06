@@ -25,6 +25,8 @@
 
 #define BLP_BIT(act32)	(1u << ((act32) - 32))
 
+void blping_code(int code);
+
 static void blping_pick(void)
 {
 	writel(readl((void __iomem *)BLP_PEFH_CNR) &
