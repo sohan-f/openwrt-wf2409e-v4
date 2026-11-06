@@ -1,0 +1,143 @@
+diff --git a/target/linux/rtl819x/dts/rtl8197f.dtsi b/target/linux/rtl819x/dts/rtl8197f.dtsi
+index efa1618..a519e8d 100644
+--- a/target/linux/rtl819x/dts/rtl8197f.dtsi
++++ b/target/linux/rtl819x/dts/rtl8197f.dtsi
+@@ -46,15 +46,13 @@
+ 			compatible = "fixed-clock";
+ 			#clock-cells = <0>;
+ 			/*
+-			 * Measured, not guessed: the loader read the divisor the
+-			 * bootloader programmed for its clean 38400 console and it
+-			 * is 162 (0xa2). 162 * 16 * 38400 = 99532800, so the UART
+-			 * reference is ~99.53 MHz. Using this exact value makes the
+-			 * kernel's 8250 compute divisor 162 -- identical to the
+-			 * bootloader -- instead of 163 (from the scaffold's 100 MHz),
+-			 * which garbled the console.
++			 * UART reference clock = 100 MHz (vendor BSP_UART0_FREQ,
++			 * bspchip.h:110). Loader and stock kernel both program
++			 * divisor 162 at 38400 = 100e6/16/38400 truncated; the
++			 * older "~99.53 MHz" here was an exact-divisor inference
++			 * that ignored that truncation.
+ 			 */
+-			clock-frequency = <99532800>;
++			clock-frequency = <100000000>;
+ 		};
+ 
+ 		spic_clk: spic-clock {
+@@ -96,7 +94,7 @@
+ 		reg = <0x18147000 0x100>;
+ 		reg-shift = <2>;
+ 		reg-io-width = <4>;
+-		clock-frequency = <99532800>;
++		clock-frequency = <100000000>;
+ 		/*
+ 		 * No interrupt on purpose: the ictl cascade is not wired up yet
+ 		 * (only the CP0 timer on IP7 works), so the UART IRQ never fires
+diff --git a/target/linux/rtl819x/files/arch/mips/rtl819x/setup.c b/target/linux/rtl819x/files/arch/mips/rtl819x/setup.c
+index 92a8f8d..7978079 100644
+--- a/target/linux/rtl819x/files/arch/mips/rtl819x/setup.c
++++ b/target/linux/rtl819x/files/arch/mips/rtl819x/setup.c
+@@ -29,6 +29,16 @@
+ #define RTL8197F_GIMR		0xb8003000
+ #define RTL8197F_GIMR2		0xb8003020
+ #define RTL8197F_WDTCNR		0xb800311c
++#define RTL8197F_IRR0		0xb8003008
++#define RTL8197F_IRR1		0xb800300c
++#define RTL8197F_IRR2		0xb8003010
++#define RTL8197F_IRR3		0xb8003014
++/* bank 2 (sources 32..63): GIMR2/GISR2 live at 0x3020/0x3024, so IRR4..7
++ * continue at 0x3028, not 0x3018 (vendor bspchip.h:283-295). */
++#define RTL8197F_IRR4		0xb8003028
++#define RTL8197F_IRR5		0xb800302c
++#define RTL8197F_IRR6		0xb8003030
++#define RTL8197F_IRR7		0xb8003034
+ 
+ /*
+  * RTL8197F UART (KSEG1 0xb8147000): LSR at +0x14 (THRE = 0x20), and the RX/TX
+@@ -93,6 +103,8 @@ void __init plat_mem_setup(void)
+ 
+ void __init plat_time_init(void)
+ {
++	unsigned int hwstrap, freq, div;
++
+ 	/*
+ 	 * Register the device-tree fixed-clocks (spic_clk, uart_clk, ...). The
+ 	 * generic of_platform populate does not turn the /clocks child nodes into
+@@ -103,38 +115,54 @@ void __init plat_time_init(void)
+ 	of_clk_init(NULL);
+ 
+ 	/*
+-	 * CP0 Count/Compare timer frequency. On MIPS 24Kc the Count register runs
+-	 * at half the CPU clock (bootloader reports 999 MHz). TODO: derive from a
+-	 * DT CPU clock once modelled.
++	 * CP0 Count/Compare timer frequency from the hardware straps
++	 * (0xB8000008): bit14 -> 200 MHz, else cpu_clksel_table[bits 15:18]
++	 * * 1e6 divided by cpu_clkdiv_table[bits 19:20]. The Count register
++	 * runs at half of that (vendor timer.c; stock is the same shape).
+ 	 */
+-	mips_hpt_frequency = 999000000 / 2;
+-
+-	/*
+-	 * On the RTL8197F the CP0 compare timer's SI_TimerInt is NOT delivered on a
+-	 * CP0 IP directly; it is fed into the SoC interrupt controller (ictl at
+-	 * 0x18003000) as GISR2 bit 15 (CPU_SI_TIMER). The Realtek BSP routes that
+-	 * source to CPU IP7 via the ictl routing register IRR5 and enables it in
+-	 * GIMR2, then handles it as the r4k compare IRQ on IP7 (BSP_COMPARE_IRQ =
+-	 * CPU_BASE+7). Without this the compare interrupt never reaches the CPU and
+-	 * the boot hangs in calibrate_delay(). Program the ictl the same way (KSEG1
+-	 * regs), then point the r4k clockevent at IP7. (IntCtl.IPTI reads 2 here and
+-	 * is read-only / irrelevant to this routing.)
+-	 */
+-	{
+-		volatile u32 *gimr2 = (volatile u32 *)0xb8003020;
+-		volatile u32 *irr5  = (volatile u32 *)0xb800302c;
+-
+-		*irr5 = 0x70000000;		/* CPU_SI_TIMER (src47) -> CPU IP7 */
+-		*gimr2 |= (1u << 15);		/* enable CPU_SI_TIMER */
++	hwstrap = *(volatile u32 *)0xb8000008;
++	if ((hwstrap >> 14) & 1) {
++		freq = 200000000;
++	} else {
++		static const unsigned int cpu_clksel_table[16] = {
++			450, 500, 550, 600, 650, 700, 750, 800,
++			850, 900, 950, 1000, 1050, 1100, 1150, 1200,
++		};
++		static const unsigned int cpu_clkdiv_table[4] = { 1, 2, 4, 8 };
++
++		div = (hwstrap >> 19) & 3;
++		freq = cpu_clksel_table[(hwstrap >> 15) & 0xF] * 1000000
++		       / cpu_clkdiv_table[div];
+ 	}
++	mips_hpt_frequency = freq / 2;
++
+ 	cp0_compare_irq = 7;
+ 	cp0_perfcount_irq = -1;
+ }
+ 
+ void __init arch_init_irq(void)
+ {
+-	/* TODO: confirm RTL8197F ICTL IRR0..7 routing before boot use. */
++	/*
++	 * Wholesale source->CPU IP routing, the table stock arch_init_irq
++	 * programs (0x805f1350..0x805f1420 in the mtd0 carve). IRR_k holds
++	 * one nibble per source 8k..8k+7; 0 = unrouted, N = CPU IP n. No
++	 * reset default helps: every IRR nibble's InitVal is 0.
++	 */
++	*(volatile u32 *)RTL8197F_IRR0 = 0x00000000;
++	*(volatile u32 *)RTL8197F_IRR1 = 0x42220020;	/* 15=SW -> IP4 */
++	*(volatile u32 *)RTL8197F_IRR2 = 0x20500022;	/* 21=PCIE -> IP5 */
++	*(volatile u32 *)RTL8197F_IRR3 = 0x02600200;	/* 29 -> IP6, 26/30 -> IP2 */
++	*(volatile u32 *)RTL8197F_IRR4 = 0x00202000;	/* 35/37 -> IP2 */
++	*(volatile u32 *)RTL8197F_IRR5 = 0x70000000;	/* 47=SI_TIMER -> IP7 */
++	*(volatile u32 *)RTL8197F_IRR6 = 0x00000000;
++	*(volatile u32 *)RTL8197F_IRR7 = 0x00000000;
++
+ 	irqchip_init();
++
++	/* TOCPU enables must come after irqchip_init(): the ictl scaffold
++	 * clears both GIMR banks while probing. */
++	*(volatile u32 *)RTL8197F_GIMR |= 0x20208000;	/* WLAN|PCIE|SW */
++	*(volatile u32 *)RTL8197F_GIMR2 |= 0x00008000;	/* SI_TIMER */
+ }
+ 
+ /*
