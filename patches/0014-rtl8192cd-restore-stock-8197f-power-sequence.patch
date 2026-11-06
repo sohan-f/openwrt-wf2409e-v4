@@ -1,0 +1,40 @@
+From b7ebc3fd12b3c0514b36b857f062393f871ad247 Mon Sep 17 00:00:00 2001
+From: wb <wb@local>
+Date: Fri, 6 Nov 2026 20:16:18 +0000
+Subject: [PATCH] rtl8192cd: restore stock 8197F radio power-on tail
+
+The failed image's rtl8197F_card_enable_flow contains the same first eleven
+commands as the known-bootable stock kernel's rtl8197G_card_enable_flow, but
+terminates there. The stock table has ten additional register writes before
+PWR_CMD_END. Restore those writes so InitPON8197F follows the complete sequence
+observed in the stock kernel.
+
+Signed-off-by: Sohan Ali <96324905+sohan-f@users.noreply.github.com>
+---
+ .../src/WlanHAL/RTL88XX/RTL8197F/Hal8197FPwrSeqCmd.c   | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/package/kernel/rtl8192cd/src/WlanHAL/RTL88XX/RTL8197F/Hal8197FPwrSeqCmd.c b/package/kernel/rtl8192cd/src/WlanHAL/RTL88XX/RTL8197F/Hal8197FPwrSeqCmd.c
+index 4d3f31e..189c026 100644
+--- a/package/kernel/rtl8192cd/src/WlanHAL/RTL88XX/RTL8197F/Hal8197FPwrSeqCmd.c
++++ b/package/kernel/rtl8192cd/src/WlanHAL/RTL88XX/RTL8197F/Hal8197FPwrSeqCmd.c
+@@ -54,6 +54,16 @@ WLAN_PWR_CFG rtl8197F_card_enable_flow[RTL8197F_TRANS_CARDDIS_TO_CARDEMU_STEPS+R
+ {
+     //RTL8197F_TRANS_CARDDIS_TO_CARDEMU
+     RTL8197F_TRANS_96FSOC_POWER_ON
++	{0x001F, PWR_CUT_ALL_MSK, PWR_FAB_ALL_MSK, PWR_INTF_ALL_MSK, PWR_BASEADDR_MAC, PWR_CMD_WRITE, 0x07, 0x00},
++	{0x007B, PWR_CUT_ALL_MSK, PWR_FAB_ALL_MSK, PWR_INTF_ALL_MSK, PWR_BASEADDR_MAC, PWR_CMD_WRITE, 0x07, 0x00},
++	{0x001F, PWR_CUT_ALL_MSK, PWR_FAB_ALL_MSK, PWR_INTF_ALL_MSK, PWR_BASEADDR_MAC, PWR_CMD_WRITE, 0x07, 0x07},
++	{0x007B, PWR_CUT_ALL_MSK, PWR_FAB_ALL_MSK, PWR_INTF_ALL_MSK, PWR_BASEADDR_MAC, PWR_CMD_WRITE, 0x07, 0x07},
++	{0x0020, PWR_CUT_ALL_MSK, PWR_FAB_ALL_MSK, PWR_INTF_ALL_MSK, PWR_BASEADDR_MAC, PWR_CMD_WRITE, 0x08, 0x08},
++	{0x0021, PWR_CUT_ALL_MSK, PWR_FAB_ALL_MSK, PWR_INTF_ALL_MSK, PWR_BASEADDR_MAC, PWR_CMD_WRITE, 0x04, 0x04},
++	{0x0025, PWR_CUT_ALL_MSK, PWR_FAB_ALL_MSK, PWR_INTF_ALL_MSK, PWR_BASEADDR_MAC, PWR_CMD_WRITE, 0x02, 0x00},
++	{0x001F, PWR_CUT_ALL_MSK, PWR_FAB_ALL_MSK, PWR_INTF_ALL_MSK, PWR_BASEADDR_MAC, PWR_CMD_WRITE, 0x80, 0x00},
++	{0x007B, PWR_CUT_ALL_MSK, PWR_FAB_ALL_MSK, PWR_INTF_ALL_MSK, PWR_BASEADDR_MAC, PWR_CMD_WRITE, 0x80, 0x00},
++	{0x0078, PWR_CUT_ALL_MSK, PWR_FAB_ALL_MSK, PWR_INTF_ALL_MSK, PWR_BASEADDR_MAC, PWR_CMD_WRITE, 0x40, 0x00},
+ 	//RTL8197F_TRANS_CARDEMU_TO_ACT		
+ 	RTL8197F_TRANS_END
+ };
+-- 
+2.53.0
+
