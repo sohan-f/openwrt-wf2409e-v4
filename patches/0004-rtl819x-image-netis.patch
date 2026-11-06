@@ -51,7 +51,7 @@ index c0d1fd7..6e3848a 100644
 +  IMAGE_SIZE := 7728k
 +  KERNEL := kernel-bin | append-dtb | lzma | loader-kernel | netis-cs6c
 +  KERNEL_INITRAMFS := kernel-bin | append-dtb | lzma | loader-kernel | netis-cs6c
-+  DEVICE_PACKAGES := dnsmasq kmod-rtl8192cd
++  DEVICE_PACKAGES := dnsmasq kmod-wf2409e-wlan
 +  IMAGES := factory.bin sysupgrade.bin
 +  IMAGE/sysupgrade.bin := append-kernel | check-size $$(KERNEL_SIZE) | \
 +	pad-to $$(KERNEL_SIZE) | append-rootfs | pad-rootfs | check-size | \

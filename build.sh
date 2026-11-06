@@ -65,6 +65,7 @@ echo "== apply donor patch"
 git apply --check "$BUILD_DIR/donor/patches/openwrt/0001-iptime-a2004mu-rtl8197f-support.patch"
 git apply "$BUILD_DIR/donor/patches/openwrt/0001-iptime-a2004mu-rtl8197f-support.patch"
 cp -a "$BUILD_DIR/donor/package/kernel/rtl8192cd" package/kernel/rtl8192cd
+cp -a "$REPO_ROOT/package/kernel/wf2409e-wlan" package/kernel/wf2409e-wlan
 
 echo "== update feeds (packages feed provides sqm-scripts)"
 ./scripts/feeds update -a

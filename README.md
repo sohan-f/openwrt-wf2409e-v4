@@ -133,8 +133,9 @@ build/openwrt/bin/targets/realtek/rtl8197f/*-WF2409EV4-squashfs-factory.bin
 ## Seed config
 
 `seed.config` selects the target, the `WF2409EV4` profile, squashfs, dropbear,
-firewall, dnsmasq, the GPIO button/LED modules, and `kmod-rtl8192cd`. LuCI,
-uhttpd, and `swconfig` are not included.
+firewall, dnsmasq, the GPIO button/LED modules, and `kmod-wf2409e-wlan` (the
+clean-room WLAN driver; the vendor `rtl8192cd` tree stays in-tree as buildable
+reference but is not installed). LuCI, uhttpd, and `swconfig` are not included.
 
 ## First flash
 
