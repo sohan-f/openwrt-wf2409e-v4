@@ -4,4 +4,3 @@
 # Hardware initialization is intentionally not implemented here yet.
 
 obj-y += setup.o
-obj-y += blping.o
