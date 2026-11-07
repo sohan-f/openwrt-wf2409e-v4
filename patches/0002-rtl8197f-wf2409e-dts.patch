@@ -1,24 +1,28 @@
-From 0672289559ea4432618531fc94b8ea51e4bf2fc2 Mon Sep 17 00:00:00 2001
-From: wb <wb@local>
-Date: Thu, 5 Nov 2026 00:00:00 +0000
-Subject: [PATCH] wf2409e-dts
+From c5ec4abbf472f96875c4e5ba8ef733b74a7d2c4e Mon Sep 17 00:00:00 2001
+From: Sohan Ali <96324905+sohan-f@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 17:42:53 +0000
+Subject: [PATCH] wf2409e-dts: read stock's MAC sources, drop the phantom
+ 'netis' nvmem
 
-Front-panel GPIO map for the WF2409E v4 board: PEFGH gpio bank (E1/E3
-lamps), gpio-leds and polled-button nodes pinned to the stock firmware
-pin roles (15 = wps/reset lamp act.low, 17 = wps button, 19 = reset
-button, 33 = activity lamp act.low, 35 = power lamp).
+Our nvmem cell pointed at [0x7f8000,0x7fc000), an unpartitioned hole
+that stock never reads. The stock firmware resolves the per-unit base
+MAC from the live HS/COMPHS record at 0x20000 (libapmib reads/writes it
+there, and `flash hs-backup` mirrors it to the runtime mtd2 'netis' at
+0x7fc000). Read the config cell at 0x20000 first and keep the HS backup
+cell at 0x7fc000 for the fallback userspace uses on config corruption.
 
 Signed-off-by: Sohan Ali <96324905+sohan-f@users.noreply.github.com>
 ---
- .../linux/rtl819x/dts/rtl8197f-wf2409ev4.dts  | 196 ++++++++++++++++++++++-
- 1 file changed, 196 insertions(+)
+ .../linux/rtl819x/dts/rtl8197f-wf2409ev4.dts  | 207 ++++++++++++++++++
+ 1 file changed, 207 insertions(+)
+ create mode 100644 target/linux/rtl819x/dts/rtl8197f-wf2409ev4.dts
 
 diff --git a/target/linux/rtl819x/dts/rtl8197f-wf2409ev4.dts b/target/linux/rtl819x/dts/rtl8197f-wf2409ev4.dts
 new file mode 100644
-index 0000000..181a9c5
+index 0000000..15d87ce
 --- /dev/null
 +++ b/target/linux/rtl819x/dts/rtl8197f-wf2409ev4.dts
-@@ -0,0 +1,196 @@
+@@ -0,0 +1,207 @@
 +// SPDX-License-Identifier: GPL-2.0-only OR MIT
 +
 +/dts-v1/;
@@ -132,10 +136,14 @@ index 0000000..181a9c5
 +		/*
 +		 * Netis WF2409E v4 stock layout, derived from the friend's
 +		 * working unit /proc/mtd plus a byte-level analysis of its
-+		 * mtd blocks: boot region 0x0..0x20000, config 0x20000, kernel
-+		 * header+payload at 0x30000 (cr6c, start 0x80a00000), squashfs
-+		 * rootfs from 0x300000 to the netis data block at 0x7f8000.
-+		 * The netis block holds the per-unit MAC at offset 0x3d.
++		 * mtd blocks: boot region 0x0..0x20000, config 0x20000 (live
++		 * HS/COMPHS record libapmib reads/writes), kernel header+payload
++		 * at 0x30000 (cr6c, start 0x80a00000), squashfs rootfs
++		 * 0x300000..0x7f8000, an UNPARTITIONED hole [0x7f8000,0x7fc000)
++		 * no mtd covers, and stock's runtime mtd2 "netis" (HS backup of
++		 * the config record) at 0x7fc000. The config COMPHS carries the
++		 * per-unit base MAC at offset 0x3d; the HS backup at 0x7fc000
++		 * mirrors it (same record).
 +		 */
 +		partitions {
 +			compatible = "fixed-partitions";
@@ -152,6 +160,16 @@ index 0000000..181a9c5
 +				label = "config";
 +				reg = <0x00020000 0x00010000>;
 +				read-only;
++
++				nvmem-layout {
++					compatible = "fixed-layout";
++					#address-cells = <1>;
++					#size-cells = <1>;
++
++					macaddr_config: mac-address@3d {
++						reg = <0x0000003d 0x6>;
++					};
++				};
 +			};
 +
 +			partition@30000 {
@@ -164,9 +182,12 @@ index 0000000..181a9c5
 +				reg = <0x00300000 0x004f8000>;
 +			};
 +
-+			netis: partition@7f8000 {
++			partition@7fc000 {
++				/* stock's runtime mtd2 "netis": HS backup of the config
++				 * COMPHS (fwd hs-backup/hs-restore). Read-only for us; used
++				 * as MAC fallback if the config record is unreadable. */
 +				label = "netis";
-+				reg = <0x007f8000 0x00004000>;
++				reg = <0x007fc000 0x00004000>;
 +				read-only;
 +
 +				nvmem-layout {
@@ -174,16 +195,10 @@ index 0000000..181a9c5
 +					#address-cells = <1>;
 +					#size-cells = <1>;
 +
-+					macaddr_netis: mac-address@3d {
++					macaddr_backup: mac-address@3d {
 +						reg = <0x0000003d 0x6>;
 +					};
 +				};
-+			};
-+
-+			partition@7fc000 {
-+				label = "reserved";
-+				reg = <0x007fc000 0x00004000>;
-+				read-only;
 +			};
 +		};
 +	};
@@ -195,7 +210,7 @@ index 0000000..181a9c5
 +	 * so the ethernet driver programs the internal fabric's VLAN tables
 +	 * directly (board patch 0003) instead of acting as a DSA conduit.
 +	 */
-+	nvmem-cells = <&macaddr_netis>;
++	nvmem-cells = <&macaddr_config>;
 +	nvmem-cell-names = "mac-address";
 +};
 +
@@ -215,3 +230,6 @@ index 0000000..181a9c5
 +	 */
 +	status = "disabled";
 +};
+-- 
+2.53.0
+

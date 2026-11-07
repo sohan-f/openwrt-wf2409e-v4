@@ -3,9 +3,10 @@
 #
 # netifd understands the mac80211 wiphy the clean-room module registers.
 # The driver has no DT/efuse MAC path for the radio, so the per-unit
-# WLAN MAC (stock base MAC + 2) must be set from the netis data block
-# here; the eth0.x devices carry the eth MACs instead: LAN (eth0.2) =
-# base, WAN (eth0.1) = base + 1 (see 02_network).
+# WLAN MAC (base MAC + 2) is set from the same HS/config source the
+# stock firmware uses: config (0x20000) first, HS backup (0x7fc000,
+# stock mtd2 "netis") second. The eth0.x devices carry the eth MACs
+# instead: LAN (eth0.2) = base, WAN (eth0.1) = base + 1 (see 02_network).
 
 [ -e /etc/config/wireless ] || touch /etc/config/wireless
 uci -q batch <<EOF
@@ -33,13 +34,12 @@ EOF
 
 . /lib/functions/system.sh
 
-# Per-unit radio MAC: stock base from the netis block at offset 0x3d,
-# WLAN MAC = base + 2 (WAN is base + 1 on this board; see 02_network).
-if wlan_mac=$(mtd_get_mac_binary netis 0x3d); then
-	case "$wlan_mac" in
-	[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F])
-		uci -q set wireless.radio0.macaddress="$(macaddr_add "$wlan_mac" 2)"
-		uci -q commit wireless
-		;;
-	esac
-fi
+# WLAN MAC = base + 2 (WAN is base + 1; see 02_network). config first,
+# HS backup fallback — same order as stock (see 02_network comment).
+wlan_mac=$(mtd_get_mac_binary config 0x3d 2>/dev/null) || wlan_mac=$(mtd_get_mac_binary netis 0x3d 2>/dev/null) || wlan_mac=""
+case "$wlan_mac" in
+[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F])
+	uci -q set wireless.radio0.macaddress="$(macaddr_add "$wlan_mac" 2)"
+	uci -q commit wireless
+	;;
+esac

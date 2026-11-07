@@ -4,8 +4,12 @@
 # Single eth0 conduit: VID 1 = WAN (phys port 4), VID 2 = LAN (phys ports
 # 0-3), CPU egress tagged. The rtl8197f_eth driver programs those tables
 # (target patch 0003), this board file only wires netifd and the per-unit
-# MACs measured on the friend's live stock unit: LAN (br0/eth0 = eth0.2)
-# carries the netis@0x3d base itself, WAN (eth0.1) = base+1, WMAC = base+2.
+# MACs. Source of truth and order deliberately match the stock firmware:
+# the live HS/COMPHS record at mtdblock0 offset 0x20000 (what libapmib and
+# `flash gethw HW_NIC*_ADDR` read), with the HS backup at mtdblock2/0x7fc000
+# (stock mtd2 "netis", fwd hs-backup) as fallback — i.e. stock's
+# test-hwconf/hs-restore order. LAN (br0/eth0 = eth0.2) carries the base
+# MAC, WAN (eth0.1) = base+1, WMAC = base+2.
 [ -e /etc/config/board_check ] || true
 
 . /lib/functions.sh
@@ -20,8 +24,14 @@ netis,wf2409e-v4)
 	ucidef_set_interfaces_lan_wan "eth0.2" "eth0.1"
 
 	base_mac=""
-	if base_mac=$(mtd_get_mac_binary netis 0x3d); then
+	if base_mac=$(mtd_get_mac_binary config 0x3d); then
 		[ -n "$base_mac" ] || base_mac=""
+	fi
+	# Stock hs-restore semantics: config corrupt/absent -> HS backup.
+	if [ -z "$base_mac" ]; then
+		if base_mac=$(mtd_get_mac_binary netis 0x3d); then
+			[ -n "$base_mac" ] || base_mac=""
+		fi
 	fi
 	case "$base_mac" in
 	[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F])
