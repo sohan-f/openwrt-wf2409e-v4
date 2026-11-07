@@ -1,11 +1,11 @@
 #!/bin/sh
-# Netis WF2409E v4: seed the onboard 2.4 GHz RTL8192CD radio on first boot.
+# Netis WF2409E v4: seed the onboard 2.4 GHz radio (wf2409e_wlan, M2).
 #
-# The rtl8192cd cfg80211 driver registers its wiphy and netifd's wireless
-# layer understands it. The driver has no DT/efuse MAC path for the radio,
-# so the per-unit WLAN MAC (stock base MAC + 2) must be set from the netis
-# data block here; the eth0.x devices carry the eth MACs instead: LAN
-# (eth0.2) = base, WAN (eth0.1) = base + 1 (see 02_network).
+# netifd understands the mac80211 wiphy the clean-room module registers.
+# The driver has no DT/efuse MAC path for the radio, so the per-unit
+# WLAN MAC (stock base MAC + 2) must be set from the netis data block
+# here; the eth0.x devices carry the eth MACs instead: LAN (eth0.2) =
+# base, WAN (eth0.1) = base + 1 (see 02_network).
 
 [ -e /etc/config/wireless ] || touch /etc/config/wireless
 uci -q batch <<EOF
@@ -14,7 +14,13 @@ set wireless.radio0.type='mac80211'
 set wireless.radio0.hwmode='11g'
 set wireless.radio0.channel='6'
 set wireless.radio0.htmode='HT20'
-set wireless.radio0.disabled='0'
+# Diagnostic boot build: the radio stays disabled at first boot so the
+# M2 init chain (which netifd runs on ifup) cannot destabilize boot
+# bring-up. Once the box is reachable over ssh, disarm with
+#   uci set wireless.radio0.disabled=0; wifi
+# and observe with netconsole. Remove this guard once wifi bring-up is
+# proven stable end to end.
+set wireless.radio0.disabled='1'
 set wireless.default_radio0='wifi-iface'
 set wireless.default_radio0.device='radio0'
 set wireless.default_radio0.network='lan'

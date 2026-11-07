@@ -1,0 +1,21 @@
+#!/bin/sh /etc/rc.common
+# Boot-death instrument (no-serial): arm the netconsole UDP sender as
+# early as userspace can, before netifd. The default radio seed keeps
+# the M2 init chain out of the boot path, so whatever kills this build
+# happens in the shared base; the stream shows where it stops.
+# Receiver setup: host wired to a LAN port, static 192.168.1.2/24,
+# nc -u -l 6666 (or socat udp-recv:6666 -).
+
+START=13
+
+boot() {
+	# eth0 is the single conduit; a static base address lets netpoll
+	# resolve the frame send without waiting for netifd. Redundant if
+	# netifd later adds its own address on a VLAN device - netpoll
+	# sends on the named device directly, no route table consulted.
+	ip link set eth0 up 2>/dev/null
+	ip addr add 192.168.1.1/24 dev eth0 2>/dev/null
+	insmod netconsole netconsole="=@192.168.1.1/eth0,6666@192.168.1.2/" 2>/dev/null
+	echo "eedbg: netconsole armed, target 192.168.1.2:6666, cf " \
+		>/dev/kmsg
+}

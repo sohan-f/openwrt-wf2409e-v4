@@ -20,10 +20,12 @@
  *
  * [D] Spatial layout per the donor rtl8192cd accessors: MAC regs are
  * byte/word/dword at +0x0.. (the MAC image reaches 0x1448); the BB/PHY
- * block is dword-only at +0x800..0xfff; RF access uses two ports inside
- * that block plus a readback window far beyond it, hence the size:
+ * block is dword-only at +0x800..0xfff; RF access uses LRF ports in
+ * that block plus readback windows beyond it, hence the size:
  *   RF LRF write ports      A 0x840, B 0x844   ((addr<<20)|data) & 0x0fffffff
  *   RF readback shadow win  A 0x2800, B 0x2c00 + (reg<<2), data & 0xfffff
+ *   (window base is [D] donor only; the stock kernel's RF reads bind to
+ *   single result regs at 0x8a0/0x8a4 - see docs/wlan-re.md M2.1)
  */
 #define WF_WLAN_PHYS		0x18640000	/* KSEG1 0xb8640000 */
 #define WF_WLAN_SIZE		0x3000
@@ -102,8 +104,10 @@ struct wf_rf_op {
 };
 
 /* [D] RF access protocol, phydm_hal_api8197f.c (config_phydm_*_rf_reg):
- * writes pack reg[27:20]|data[19:0] into the LRF port, reads hit the
- * shadow window far beyond the BB block. */
+ * writes pack reg[27:20]|data[19:0] into the LRF port; reads hit the
+ * shadow window below - that base is donor evidence only, the stock
+ * binary instead exposes per-path result regs at 0x8a0/0x8a4 (see
+ * docs/wlan-re.md M2.1 for the live A/B probe log). */
 #define WF_RF_LRF_A		0x840
 #define WF_RF_LRF_B		0x844
 #define WF_RF_READ_A		0x2800

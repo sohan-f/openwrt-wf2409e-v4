@@ -285,13 +285,24 @@ static void wf_trx_2t2r(struct wf_priv *priv)
  * POST extras, donor 8192cd_hw.c:18257-18261. The generated image
  * programs RF 0xb4 = 0x141f0, so the vendor gate (== 0x140a0) never
  * fires on this table; the comparison stays live regardless.
+ *
+ * The readbase comment: the donor 97F read protocol reads RF state at
+ * WMAC+0x2800/0x2c00+(reg<<2) (phydm_hal_api8197f.c:317), while the
+ * stock rtl8192cd binds its RF read to WMAC+0x8a0/0x8a4 result regs
+ * (phy_RFSerialRead -> phy_InitBBRFRegisterDefinition table, no
+ * config_phydm_*_8197f symbols in the stock kernel). Both addresses are
+ * inside our 0x3000 aperture, so neither read faults; log both until
+ * hardware data says which window actually tracks RF state.
  */
 static void wf_post_extras(struct wf_priv *priv, struct device *dev)
 {
 	u32 b4;
+	u32 res;
 
 	b4 = wf_rf_read(priv, 0, 0xb4);
-	dev_info(dev, "POST: RF 0xb4 readback 0x%x (vendor gate 0x140a0)\n", b4);
+	res = readl(priv->wmac + 0x8a0);
+	dev_info(dev, "POST: RF 0xb4 readback: win2800 0x%x res8a0 0x%x (vendor gate 0x140a0)\n",
+		 b4, res);
 	if (b4 == 0x140a0) {
 		mdelay(1);
 		writeb(0, priv->wmac + 0x7a);
@@ -299,27 +310,41 @@ static void wf_post_extras(struct wf_priv *priv, struct device *dev)
 	writeb(0x90, priv->wmac + WF_MAC_7D4);
 }
 
-/* Channel switch, config_phydm_switch_channel_8197f: RMW RF18 with the
- * band bits (18:17) and channel byte cleared, then program both paths.
- * Vendor guards RF_PATH_B on rf_type; ours is 2T2R unconditionally.
- * Vendor's 0xc70 AGC-table read is DIG bookkeeping, no hardware effect
- * without our DIG, so skipped. Readbacks logged for bring-up.
+/*
+ * Chassis base for the RF18 RMW, = the value the generated RF image
+ * itself programs into RF18 (wf2409e_tables.h, donor radioa.txt row).
+ * The vendor switch (config_phydm_switch_channel_8197f, hal_api:827)
+ * sources this from a readback, but our read window is only [D]-grade
+ * evidence (donor 0x2800 window vs the stock kernel's 0x8a0 result-reg
+ * path), so the write must not eat a wrong-window read: a garbage base
+ * here would program random band bits into RF18. 0x0c07 & ~(0x60000|0xff)
+ * | 6 = 0x000c06 for channel 6.
  */
+#define WF_RF_CHNBW_BASE	0x000c07
+
+/* Channel switch, config_phydm_switch_channel_8197f: clear band bits
+ * (18:17) and channel byte, program both paths. Vendor guards RF_PATH_B
+ * on rf_type; ours is 2T2R unconditionally. Vendor's 0xc70 AGC-table
+ * read is DIG bookkeeping, no hardware effect without our DIG, so
+ * skipped. The old pre-read no longer feeds the write; both candidate
+ * read windows are logged instead so hardware data can settle which
+ * one is real (see the 0x8a0 note on wf_post_extras). */
 static void wf_switch_channel(struct wf_priv *priv, struct device *dev,
 			      u8 ch)
 {
 	u32 v18;
-	u32 chk;
+	u32 pre;
+	u32 ra;
+	u32 rb;
 
-	v18 = wf_rf_read(priv, 0, WF_RF_CHNLBW);
-	dev_info(dev, "ch%u: RF18 pre-read 0x%x\n", ch, v18);
-	if (v18 == WF_RF_INVALID)
-		dev_warn(dev, "ch%u: RF18 readback invalid\n", ch);
-	v18 = (v18 & ~(BIT(18) | BIT(17) | 0xff)) | ch;
+	pre = wf_rf_read(priv, 0, WF_RF_CHNLBW);
+	v18 = (WF_RF_CHNBW_BASE & ~(BIT(18) | BIT(17) | 0xff)) | ch;
 	wf_rf_write(priv, 0, WF_RF_CHNLBW, v18);
 	wf_rf_write(priv, 1, WF_RF_CHNLBW, v18);
-	chk = wf_rf_read(priv, 0, WF_RF_CHNLBW);
-	dev_info(dev, "ch%u: RF18 post-read 0x%x\n", ch, chk);
+	ra = wf_rf_read(priv, 0, WF_RF_CHNLBW);
+	rb = wf_rf_read(priv, 1, WF_RF_CHNLBW);
+	dev_info(dev, "ch%u: RF18 pre-read 0x%x, post-read A 0x%x B 0x%x (sent 0x%x)\n",
+		 ch, pre, ra, rb, v18);
 }
 
 static void wf_tx(struct ieee80211_hw *hw, struct ieee80211_tx_control *ctx,

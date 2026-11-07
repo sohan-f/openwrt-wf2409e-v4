@@ -177,6 +177,9 @@ against the gold on the next regen, so never hand-edit it.
 
 ## Runtime expectations (M2)
 
+(Log line formats as first shipped; superseded by the M2.1 formats
+below — the semantic expectations still apply.)
+
 - First `ip link set wlan0 up` runs PWR, then the 948 image rows (the
   50 ms pauses at RF rows 0xfe/0xffe are the only pacing), trx 2T2R and
   the ch6 switch, then logs:
@@ -190,6 +193,61 @@ against the gold on the next regen, so never hand-edit it.
   log a `PWR polling timeout @0x…` line — that message means the WMAC
   clock gate/base is wrong in a way that survived compile, and nothing
   downstream of PWR ran.
+
+## M2.1: RF read window discrepancy + boot safety (Nov 7 2026)
+
+Afferent evidence, both from the stock kernel binary
+(`.local/mtd0-re/carve/`, friend-unit image):
+
+- **Writes [S]** — `odm_set_rf_reg` (0x802d415c) → `phy_set_rf_reg`
+  (0x8021b4f8, ops+0xd0) → `phy_RFSerialWrite` (0x8021b130): packs
+  `(addr<<20)|data` into the *struct*-designated port and jumps to
+  `phy_set_bb_reg`. The port table — filled by
+  `phy_InitBBRFRegisterDefinition` (0x8021fb04) — holds **A = 0x840,
+  B = 0x844**, matching the donor protocol and our LRF writes.
+- **Reads: two protocols coexist in the ecosystem.**
+  - *Donor/vendor 97F* — `config_phydm_read_rf_reg_8197f`
+    (phydm_hal_api8197f.c:317): `odm_get_bb_reg(dm, 0x2800/0x2c00 +
+    (reg & 0xff)<<2, mask)` — a per-register shadow window.
+  - *Stock binary* — `odm_get_rf_reg` (0x802d41fc) → `phy_query_rf_reg`
+    (0x8021b4e8, ops+0xd4) → `phy_RFSerialRead` (0x8021b160): final
+    access = `phy_query_bb_reg(priv, s2[+0x40 | +0x44], 0xfffff)` with
+    the same init struct giving **0x8a0 (A) / 0x8a4 (B)** — a single
+    result register per path, NOT the 0x2800 window. The stock kernel
+    contains **no `config_phydm_*_8197f` symbols** (only 8197G), so
+    which binding actually runs on this chip was never settled by
+    static evidence alone.
+- Consequence for M2: reads were only ever correctness-checks, but the
+  ch6 switch *fed* the write from the pre-read — a wrong window would
+  have programmed arbitrary 20 bits into RF18.
+
+M2.1 changes in `wf2409e_wlan.c`:
+
+- `wf_switch_channel` writes RF18 = `0x000c06` on both paths, computed
+  from the **image's own RF18 row (0x000c07)** with the vendor masks
+  (`0x0c07 & ~(BIT18|BIT17|0xff) | 6`); the pre-read no longer feeds
+  the write.
+- Both read protocols are now *probed* and logged: the donor window
+  (`0x2800` + `(reg<<2)`) and the stock result regs (`0x8a0/0x8a4`):
+  - `POST: RF 0xb4 readback: win2800 0x… res8a0 0x…`
+  - `ch6: RF18 pre-read 0x…, post-read A 0x… B 0x… (sent 0x…)` — the
+    `(sent)` field shows the written value; whichever readback window
+    returns `…000c … c06`-shaped values is the live one.
+- Both candidate addresses sit inside the 0x3000 WMAC aperture, so a
+  wrong guess cannot fault: worst case is a garbage log value.
+
+Boot-safety overlay for the next artifacts:
+
+- Radio seeded **disabled** (`20_wireless` uci-default →
+  `disabled='1'`): netifd will not run M2's start() during boot, so a
+  clean boot isolates the death to shared base code; radio bring-up
+  moves to an explicit ssh step with netconsole already streaming.
+- `kmod-netconsole` + `/etc/init.d/eednetcon` (S13, files overlay):
+  arms `netconsole=@192.168.1.1/eth0,6666@192.168.1.2/` right after
+  eth0 exists, before netifd, so the whole post-eth boot streams to a
+  host listening with `nc -u -l 6666` (or `socat udp-recv:6666 -`) at
+  static `192.168.1.2/24`. If the boot dies before S13, nothing is
+  captured — that failure mode needs a different instrument.
 
 ## Open questions / next milestones
 
