@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * wf2409e_wlan.c - Netis WF2409E v4 (RTL8197F) clean-room WLAN driver, M1.
+ * wf2409e_wlan.c - Netis WF2409E v4 (RTL8197F) clean-room WLAN driver, M2.
  *
- * Milestone scope: identify the silicon, run the stock 8197F power-on
- * sequence through our own PWR engine, and register a non-communicating
- * mac80211 device. M2 adds MAC/BB/RF init sheets, M3 descriptor rings
- * and real TX/RX. Per-constant evidence: docs/wlan-re.md.
+ * Milestone scope: M1 card enable + PWR engine, plus the vendor init
+ * chain rtl8192cd_init_hw_PCI runs for the 97F: MAC/BB/AGC/RF register
+ * images (GENERATED tables, tools/wf-macbb-gen.py), trx 2T2R mode, and
+ * an explicit channel switch. Still no descriptor rings or real TX/RX
+ * (M3). Per-constant evidence: docs/wlan-re.md.
  */
 
 #include <linux/delay.h>
@@ -16,6 +17,7 @@
 #include <net/mac80211.h>
 
 #include "wf2409e_wlan.h"
+#include "wf2409e_tables.h"
 
 struct wf_priv {
 	void __iomem *wmac;
@@ -156,6 +158,170 @@ static bool wf_chip_ok(struct device *dev)
 	return true;
 }
 
+/* BB block helper set. phy_set_bb_reg RMWs except with the full dword
+ * mask, where it is a plain write; generated image rows carry the full
+ * mask shape by construction, trx writes reuse the RMW helper with the
+ * vendor masks. */
+
+static inline u32 wf_bb_r32(struct wf_priv *priv, u16 off)
+{
+	return readl(priv->wmac + off);
+}
+
+static inline void wf_bb_w32(struct wf_priv *priv, u16 off, u32 v)
+{
+	writel(v, priv->wmac + off);
+}
+
+static inline void wf_bb_rmw32(struct wf_priv *priv, u16 off, u32 msk, u32 set)
+{
+	u32 v;
+
+	v = readl(priv->wmac + off);
+	v = (v & ~msk) | (set & msk);
+	writel(v, priv->wmac + off);
+}
+
+/* RF access per config_phydm_write/read_rf_reg_8197f. Every M2 write
+ * (images, trx, RF18) carries a full 20-bit payload, so vendor's
+ * read-merge branch for partial masks never runs. Donor paces writes
+ * 1us (odm_config_rf_reg_8197f). */
+static u32 wf_rf_read(struct wf_priv *priv, u8 path, u8 reg)
+{
+	u16 base = path ? WF_RF_READ_B : WF_RF_READ_A;
+
+	return readl(priv->wmac + base + (reg << 2)) & WF_RF_MASK;
+}
+
+static void wf_rf_write(struct wf_priv *priv, u8 path, u8 reg, u32 data)
+{
+	void __iomem *port = priv->wmac + (path ? WF_RF_LRF_B : WF_RF_LRF_A);
+
+	writel(((reg << 20) | (data & WF_RF_MASK)) & 0x0fffffff, port);
+	udelay(1);
+}
+
+static void wf_mac_img_apply(struct wf_priv *priv,
+			     const struct wf_mac_op *tbl, size_t n)
+{
+	size_t i;
+
+	for (i = 0; i < n; i++)
+		writeb(tbl[i].val, priv->wmac + tbl[i].addr);
+}
+
+static void wf_bb_img_apply(struct wf_priv *priv,
+			    const struct wf_bb_op *tbl, size_t n)
+{
+	size_t i;
+
+	for (i = 0; i < n; i++)
+		writel(tbl[i].val, priv->wmac + tbl[i].addr);
+}
+
+static void wf_rf_img_apply(struct wf_priv *priv, u8 path,
+			    const struct wf_rf_op *tbl, size_t n)
+{
+	size_t i;
+	u16 addr;
+
+	for (i = 0; i < n; i++) {
+		addr = tbl[i].addr;
+		if (addr == 0xfe || addr == 0xffe)
+			mdelay(50);
+		else
+			wf_rf_write(priv, path, addr, tbl[i].val);
+	}
+}
+
+/*
+ * trx 2T2R = donor config_phydm_trx_mode_8197f(BB_PATH_AB, BB_PATH_AB,
+ * tx2path) + phydm_config_cck_rx_path(BB_PATH_A) - vendor keeps CCK CCA
+ * 1R despite OFDM 2R ("FA issue" workaround, phydm_hal_api:1111) - plus
+ * phydm_cca_par_by_bw_8197f for rfe1/pkg1, cut!=A, BW20, rx AB.
+ */
+static void wf_trx_2t2r(struct wf_priv *priv)
+{
+	u32 v;
+
+	/* OFDM TX path AB; mask is bits 27:0, vendor keeps 0x90c[31:28] */
+	wf_bb_rmw32(priv, WF_BB_TX_PATH, 0x0fffffff, 0x01121313);
+	wf_bb_rmw32(priv, WF_BB_RX_PATH, 0xff, 0x33);
+	wf_bb_rmw32(priv, WF_BB_RX_ANT, 0xf, 0x3);
+	/* CCK TX path AB first (is_tx2path upgrades H4 0x8 -> 0xc below) */
+	wf_bb_rmw32(priv, WF_BB_CCK_ANT_SEL, 0xf0000000, 0x8 << 28);
+	/* CCK RX: both input selects to path A, no diversity, no 2R */
+	wf_bb_rmw32(priv, WF_BB_CCK_ANT_SEL, BIT(27) | BIT(26), 0);
+	wf_bb_rmw32(priv, WF_BB_CCK_ANT_SEL, BIT(25) | BIT(24), 0);
+	wf_bb_rmw32(priv, WF_BB_CCK_DIV, BIT(8), 0);
+	wf_bb_rmw32(priv, WF_BB_CCK_2R, BIT(18) | BIT(17), 0);
+	wf_bb_rmw32(priv, WF_BB_CCK_2R, BIT(22) | BIT(21), 0);
+	/* 2-path TX upgrade */
+	wf_bb_rmw32(priv, WF_BB_TX_PATH, 0x0fffffff, 0x03321333);
+	wf_bb_rmw32(priv, WF_BB_TX_ANT_CTRL, BIT(31), 0);
+	wf_bb_rmw32(priv, WF_BB_CCK_ANT_SEL, 0xf0000000, 0xc << 28);
+	/* 2T RF table: standby then RX mode per path */
+	wf_rf_write(priv, 0, 0x30, 0x08000);
+	wf_rf_write(priv, 0, 0x31, 0x0005f);
+	wf_rf_write(priv, 0, 0x32, 0x01042);
+	wf_rf_write(priv, 0, 0x30, 0x18000);
+	wf_rf_write(priv, 0, 0x31, 0x0004f);
+	wf_rf_write(priv, 0, 0x32, 0x71fc2);
+	wf_rf_write(priv, 1, 0x30, 0x08000);
+	wf_rf_write(priv, 1, 0x31, 0x00050);
+	wf_rf_write(priv, 1, 0x32, 0x01042);
+	wf_rf_write(priv, 1, 0x30, 0x18000);
+	wf_rf_write(priv, 1, 0x31, 0x00040);
+	wf_rf_write(priv, 1, 0x32, 0x71fc2);
+	/* CCA params for rfe1/pkg1/cut!=A/BW20: C3C[8:3], AAA[20:16] */
+	v = wf_bb_r32(priv, WF_BB_CCA_C3C);
+	v &= ~0x1f8;
+	v |= (0x2 << 3) | (0x6 << 6);
+	wf_bb_w32(priv, WF_BB_CCA_C3C, v);
+	wf_bb_rmw32(priv, WF_BB_CCA_AAA, 0x1f0000, 0x12 << 16);
+}
+
+/*
+ * POST extras, donor 8192cd_hw.c:18257-18261. The generated image
+ * programs RF 0xb4 = 0x141f0, so the vendor gate (== 0x140a0) never
+ * fires on this table; the comparison stays live regardless.
+ */
+static void wf_post_extras(struct wf_priv *priv, struct device *dev)
+{
+	u32 b4;
+
+	b4 = wf_rf_read(priv, 0, 0xb4);
+	dev_info(dev, "POST: RF 0xb4 readback 0x%x (vendor gate 0x140a0)\n", b4);
+	if (b4 == 0x140a0) {
+		mdelay(1);
+		writeb(0, priv->wmac + 0x7a);
+	}
+	writeb(0x90, priv->wmac + WF_MAC_7D4);
+}
+
+/* Channel switch, config_phydm_switch_channel_8197f: RMW RF18 with the
+ * band bits (18:17) and channel byte cleared, then program both paths.
+ * Vendor guards RF_PATH_B on rf_type; ours is 2T2R unconditionally.
+ * Vendor's 0xc70 AGC-table read is DIG bookkeeping, no hardware effect
+ * without our DIG, so skipped. Readbacks logged for bring-up.
+ */
+static void wf_switch_channel(struct wf_priv *priv, struct device *dev,
+			      u8 ch)
+{
+	u32 v18;
+	u32 chk;
+
+	v18 = wf_rf_read(priv, 0, WF_RF_CHNLBW);
+	dev_info(dev, "ch%u: RF18 pre-read 0x%x\n", ch, v18);
+	if (v18 == WF_RF_INVALID)
+		dev_warn(dev, "ch%u: RF18 readback invalid\n", ch);
+	v18 = (v18 & ~(BIT(18) | BIT(17) | 0xff)) | ch;
+	wf_rf_write(priv, 0, WF_RF_CHNLBW, v18);
+	wf_rf_write(priv, 1, WF_RF_CHNLBW, v18);
+	chk = wf_rf_read(priv, 0, WF_RF_CHNLBW);
+	dev_info(dev, "ch%u: RF18 post-read 0x%x\n", ch, chk);
+}
+
 static void wf_tx(struct ieee80211_hw *hw, struct ieee80211_tx_control *ctx,
 		  struct sk_buff *skb)
 {
@@ -165,13 +331,31 @@ static void wf_tx(struct ieee80211_hw *hw, struct ieee80211_tx_control *ctx,
 static int wf_start(struct ieee80211_hw *hw)
 {
 	struct wf_priv *priv = hw->priv;
+	struct device *dev = &hw->wiphy->dev;
 	int err;
 
-	err = wf_pwr_run(priv, &hw->wiphy->dev, wf_card_enable_flow);
+	err = wf_pwr_run(priv, dev, wf_card_enable_flow);
 	if (err)
 		return err;
 
-	dev_info(&hw->wiphy->dev, "card-enable sequence complete\n");
+	/* 97F init chain order, donor rtl8192cd_init_hw_PCI: PRE gate ->
+	 * MAC img -> BB phy_reg -> AGC tab -> RF imgs A/B -> POST gate ->
+	 * POST extras -> trx -> our pick of channel 6 */
+	wf_bb_rmw32(priv, WF_BB_BB_CTRL, BIT(25) | BIT(24), 0);
+	wf_mac_img_apply(priv, wf_mac_img, WF_MAC_IMG_N);
+	wf_bb_img_apply(priv, wf_bb_img, WF_BB_IMG_N);
+	wf_bb_img_apply(priv, wf_agc_img, WF_AGC_IMG_N);
+	wf_rf_img_apply(priv, 0, wf_rf_a_img, WF_RF_A_IMG_N);
+	wf_rf_img_apply(priv, 1, wf_rf_b_img, WF_RF_B_IMG_N);
+	wf_bb_rmw32(priv, WF_BB_BB_CTRL, BIT(25) | BIT(24),
+		    BIT(25) | BIT(24));
+	wf_post_extras(priv, dev);
+	wf_trx_2t2r(priv);
+	wf_switch_channel(priv, dev, 6);
+
+	dev_info(dev, "init chain complete: mac %d, bb %d, agc %d, rfA %d, rfB %d rows\n",
+		 WF_MAC_IMG_N, WF_BB_IMG_N, WF_AGC_IMG_N,
+		 WF_RF_A_IMG_N, WF_RF_B_IMG_N);
 	return 0;
 }
 
@@ -233,18 +417,18 @@ static struct ieee80211_channel wf_chan_2g[] = {
 };
 
 static struct ieee80211_rate wf_rate_2g[] = {
-	{ .flags = IEEE80211_RATE_SUPPORTED, .hw_value = 10,  .bitrate = 10 },
-	{ .flags = IEEE80211_RATE_SUPPORTED, .hw_value = 20,  .bitrate = 20 },
-	{ .flags = IEEE80211_RATE_SUPPORTED, .hw_value = 55,  .bitrate = 55 },
-	{ .flags = IEEE80211_RATE_SUPPORTED, .hw_value = 110, .bitrate = 110 },
-	{ .flags = IEEE80211_RATE_SUPPORTED, .hw_value = 60,  .bitrate = 60 },
-	{ .flags = IEEE80211_RATE_SUPPORTED, .hw_value = 90,  .bitrate = 90 },
-	{ .flags = IEEE80211_RATE_SUPPORTED, .hw_value = 120, .bitrate = 120 },
-	{ .flags = IEEE80211_RATE_SUPPORTED, .hw_value = 180, .bitrate = 180 },
-	{ .flags = IEEE80211_RATE_SUPPORTED, .hw_value = 240, .bitrate = 240 },
-	{ .flags = IEEE80211_RATE_SUPPORTED, .hw_value = 360, .bitrate = 360 },
-	{ .flags = IEEE80211_RATE_SUPPORTED, .hw_value = 480, .bitrate = 480 },
-	{ .flags = IEEE80211_RATE_SUPPORTED, .hw_value = 540, .bitrate = 540 },
+	{ .hw_value = 10,  .bitrate = 10 },
+	{ .hw_value = 20,  .bitrate = 20 },
+	{ .hw_value = 55,  .bitrate = 55 },
+	{ .hw_value = 110, .bitrate = 110 },
+	{ .hw_value = 60,  .bitrate = 60 },
+	{ .hw_value = 90,  .bitrate = 90 },
+	{ .hw_value = 120, .bitrate = 120 },
+	{ .hw_value = 180, .bitrate = 180 },
+	{ .hw_value = 240, .bitrate = 240 },
+	{ .hw_value = 360, .bitrate = 360 },
+	{ .hw_value = 480, .bitrate = 480 },
+	{ .hw_value = 540, .bitrate = 540 },
 };
 
 static struct ieee80211_supported_band wf_band_2g = {
@@ -367,4 +551,4 @@ module_init(wf_mod_init);
 module_exit(wf_mod_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Netis WF2409E v4 RTL8197F WLAN clean-room driver (M1)");
+MODULE_DESCRIPTION("Netis WF2409E v4 RTL8197F WLAN clean-room driver (M2)");

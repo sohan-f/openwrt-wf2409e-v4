@@ -11,13 +11,22 @@
 #ifndef WF2409E_WLAN_H
 #define WF2409E_WLAN_H
 
+#include <linux/types.h>
+
 /*
  * [S] WMAC register space, from wlan_device[0] at VA 0x805bd67c in the
  * stock kernel (words: base 0xb8640000, irq 6). Same base/irq the donor
  * build compiled for TYPE_EMBEDDED.
+ *
+ * [D] Spatial layout per the donor rtl8192cd accessors: MAC regs are
+ * byte/word/dword at +0x0.. (the MAC image reaches 0x1448); the BB/PHY
+ * block is dword-only at +0x800..0xfff; RF access uses two ports inside
+ * that block plus a readback window far beyond it, hence the size:
+ *   RF LRF write ports      A 0x840, B 0x844   ((addr<<20)|data) & 0x0fffffff
+ *   RF readback shadow win  A 0x2800, B 0x2c00 + (reg<<2), data & 0xfffff
  */
 #define WF_WLAN_PHYS		0x18640000	/* KSEG1 0xb8640000 */
-#define WF_WLAN_SIZE		0x400
+#define WF_WLAN_SIZE		0x3000
 #define WF_WLAN_IRQ		6	/* unused until M3 rings/ISR */
 
 /*
@@ -68,5 +77,56 @@ struct wf_pwr_cmd_entry {
 	u8 msk;
 	u8 value;
 };
+
+/*
+ * [D] Image row shapes, donor halhwimg8197f_*.c walkers: MAC rows apply
+ * plain byte writes (odm_write_1byte), BB/AGC rows apply odm_set_bb_reg
+ * with the walker's full dword mask (plain writel), RF rows go through
+ * the LRF write protocol above. The generator resolves condition
+ * records and delay pseudo-addrs at build time; RF tables may still
+ * carry 0xfe/0xffe rows (50 ms pause, no write).
+ */
+struct wf_mac_op {
+	u16 addr;
+	u8 val;
+};
+
+struct wf_bb_op {
+	u16 addr;
+	u32 val;
+};
+
+struct wf_rf_op {
+	u16 addr;
+	u32 val;
+};
+
+/* [D] RF access protocol, phydm_hal_api8197f.c (config_phydm_*_rf_reg):
+ * writes pack reg[27:20]|data[19:0] into the LRF port, reads hit the
+ * shadow window far beyond the BB block. */
+#define WF_RF_LRF_A		0x840
+#define WF_RF_LRF_B		0x844
+#define WF_RF_READ_A		0x2800
+#define WF_RF_READ_B		0x2c00
+#define WF_RF_MASK		0xfffff		/* RFREGOFFSETMASK */
+#define WF_RF_INVALID		0xffffffff	/* INVALID_RF_DATA */
+
+/* [D] BB setup rows, phydm_regdefine11n.h + 8192cd_hw.c 97F blocks */
+#define WF_BB_BB_CTRL		0x800	/* ODM_REG_BB_CTRL_11N */
+#define WF_BB_TX_ANT_CTRL	0x80c
+#define WF_BB_TX_PATH		0x90c
+#define WF_BB_RX_PATH		0xc04
+#define WF_BB_CCA_C3C		0xc3c
+#define WF_BB_CCK_2R		0xa2c
+#define WF_BB_CCK_DIV		0xa74
+#define WF_BB_CCK_ANT_SEL	0xa04
+#define WF_BB_CCA_AAA		0xaa8
+#define WF_BB_RX_ANT		0xd04
+
+/* [D] RF channel/bandwidth (RF18) */
+#define WF_RF_CHNLBW		0x18
+
+/* [D] MAC-side extras, 8192cd_hw.c:18258-18261 */
+#define WF_MAC_7D4		0x7d4
 
 #endif /* WF2409E_WLAN_H */
